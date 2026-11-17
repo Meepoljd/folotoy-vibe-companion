@@ -13,11 +13,22 @@ struct RadioStation:Codable,Equatable,Identifiable {
         return true
     }
     var object:[String:Any] { ["name":name,"url":url] }
+    static func resolvedStreamURL(_ url:URL)->URL {
+        // Early presets stored this provider path with an extra slash, which
+        // the server now closes without a response. Keep existing device lists
+        // usable without rewriting their names, order or saved preferences.
+        guard url.host?.lowercased()=="rfienchinois64k.ice.infomaniak.ch",
+              url.path=="//rfienchinois-64.mp3",
+              var components=URLComponents(url:url,resolvingAgainstBaseURL:false) else {return url}
+        components.path="/rfienchinois-64.mp3"
+        return components.url ?? url
+    }
+
     static let presets:[RadioStation]=[
         ("CNR-1 中国之声","https://lhttp.qtfm.cn/live/15318317/64k.mp3"),
         ("CNR-2 经济之声","http://ngcdn002.cnr.cn/live/jjzs/index.m3u8"),
         ("CNR-9 文艺之声","http://satellitepull.cnr.cn/live/wxwyzs/playlist.m3u8"),
-        ("新闻联播","https://rfienchinois64k.ice.infomaniak.ch//rfienchinois-64.mp3"),
+        ("RFI 法广中文广播","https://rfienchinois64k.ice.infomaniak.ch/rfienchinois-64.mp3"),
         ("CCTV-10科教伴音","https://piccpndali.v.myalicdn.com/audio/cctv10_2.m3u8"),
         ("第一财经","http://lhttp.qingting.fm/live/276/64k.mp3"),
         ("国际新闻","https://lhttp.qtfm.cn/live/20500172/64k.mp3"),

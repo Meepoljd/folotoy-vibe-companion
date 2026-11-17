@@ -8,6 +8,9 @@
 按住按键向电脑输入文字，Agent 完成任务或需要你操作时亮屏响铃；
 天气、番茄钟和收音机，也在手边。
 
+**蓝牙和 Wi-Fi 都支持。** 公司网络不便让设备接入时，直接通过蓝牙连接电脑，
+语音输入、回车、Agent 提醒和收音机照常可用。收音机由电脑联网获取电台。
+
 **目前桌面端仅支持 macOS 13+（Apple Silicon / Intel），暂不支持 Windows。**
 
 ![Vibe 伴侣：无线语音输入、专注计时与 Agent 提醒](assets/brand/vibe-companion-hero.png)
@@ -53,7 +56,7 @@
 
 ## 开始使用
 
-你需要 **FoloToy AI Passport**、**macOS 13 或更高版本**，以及可以互通的局域网。
+你需要 **FoloToy AI Passport**、**macOS 13 或更高版本**，可选择 BLE 蓝牙或可以互通的局域网。
 Mac 安装包同时支持 **Apple Silicon 和 Intel**。语音输入另需安装
 [BlackHole 2ch](https://existential.audio/blackhole/) 和
 [微信输入法](https://z.weixin.qq.com/)，或其他兼容的“按住说话”输入法。
@@ -63,16 +66,18 @@ Mac 安装包同时支持 **Apple Silicon 和 Intel**。语音输入另需安装
    再从 [GitHub Releases](https://github.com/lialun/folotoy-vibe-companion/releases/latest)
    下载配套版本的 Mac App，拖入“应用程序”。详细配置和按键说明见
    [设备使用指南](docs/vibe/README.zh_CN.md)。
-2. **用手机给设备联网。** 连接设备配网热点，选择 2.4 GHz Wi-Fi。
+2. **连接设备。** 在电脑点击连接，在设备上按上键确认。Wi-Fi／BLE 可同时连接；详见[设备连接](docs/vibe/connections.zh_CN.md)。
+   全新设备提供蓝牙、Wi-Fi 和稍后三个入口。蓝牙无需配网；使用 Wi-Fi 时，在设备选择 Wi-Fi，
+   用手机连接设备热点，选择 2.4 GHz 网络。
    最多记住五个网络，在家和公司等已配置网络间自动重连。
-3. **配对设备。** 在 App 输入设备显示的配对码。需要语音输入时，再在输入法中选择
-   BlackHole 2ch，设置相同的“按住说话”快捷键，为 App 授予快捷键控制权限。
+3. **配置语音（可选）。** 在输入法中选择
+   BlackHole 2ch，设置相同的“按住说话”快捷键，为 App 授予辅助功能授权。
    只用 Agent 提醒无需配置语音。首次打开和授权流程见
    [Mac 安装指南](docs/vibe/install.zh_CN.md)。
 4. **接入你使用的 Agent。** 在“Agent 提醒”安装集成，按 Agent 要求审核信任，
    再用一次真实事件确认提醒。
 
-设备通过局域网发送麦克风音频，语音识别由输入法完成，遵循该输入法的设置及服务规则。
+设备通过所选的局域网或 BLE 链路发送麦克风音频，语音识别由输入法完成，遵循该输入法的设置及服务规则。
 设备不是通用 USB 或蓝牙麦克风。语音和 Agent 提醒要求客户端运行、电脑保持唤醒；
 番茄钟和天气不依赖客户端持续运行。
 
@@ -95,8 +100,8 @@ xattr -dr com.apple.quarantine "/Applications/Vibe 伴侣.app"
 ## 平台与兼容性
 
 - **已实现：** ESP32-C3 固件和 macOS 客户端，Windows／Linux 客户端尚未实现。
-- **验证范围：** 开发期间已在 Apple Silicon 和目标设备上测试；Intel 版本已交叉编译，
-  Intel 实机和干净系统安装仍待验证。收音机可用性取决于电台源、音频格式、网络及设备资源。
+- **验证范围：** 本轮已在 Intel Mac 和目标设备上测试，安装包包含 Apple Silicon 和 Intel。
+  本轮 Apple Silicon 实机、干净系统安装及多台实体设备／电脑仍待验证。收音机可用性取决于电台源、音频格式和网络。
 
 ## 开发与贡献
 

@@ -24,6 +24,7 @@
 4. **上传 artifact**：每次成功构建都上传 `FoloToy-AI-Passport-full.bin`。普通分支只有从该分支手动运行 `workflow_dispatch` 才会构建；普通 push 不触发。
 5. **主机检查**：独立 checks job 运行 `./tools/validate.sh --static`，检查仓库、工作流与主机逻辑。
 6. **Mac App**：运行 `bash macos/build.sh`，执行 C／Swift 协议测试，构建 arm64／x86_64 通用 App，临时签名并生成 DMG 和 ZIP。
+   上传前生成本地 MP3／AAC／TS 样本，用 `tests/vibe/test_radio_playback.py --executable <已构建的App可执行文件>` 验证安装包中的真实解码、HTTP／HLS／ICY 故障与取消。FFmpeg 仅生成测试样本，不进入安装包，最终用户无需安装。
 7. **标签发布**：前三类检查／构建全部通过后，独立 release job 下载产物，生成双语安装／发布说明及所有文件的校验值，公开 Release。默认使用免费 ad-hoc 签名，不使用付费 Apple 账号或 Apple 密钥，也未经 Apple 公证。
 
 构建 job 只有 `contents: read` 权限；仅 release job 在 tag 发布时获得 `contents: write`。所有 Action 均固定到完整 commit SHA，行尾注释保留对应发布版本，升级时需同时核对 SHA 与版本。
@@ -89,4 +90,4 @@ tag 触发的 Release 只有在合并固件与它的 Release 说明一起发布�
 ## 桌面端 PR 检查
 
 `.github/workflows/macos-checks.yml` 独立验证涉及桌面端的 PR、匹配的 `main` 推送和手动触发。
-它运行通用构建、原生协议／Agent 测试、签名检查和 DMG 校验，仓库权限只读，不创建发布。
+它运行通用构建、原生协议／Agent 测试、签名检查、DMG 校验，以及同一套安装包可执行文件的解码／网络回归；仓库权限只读，不创建发布。

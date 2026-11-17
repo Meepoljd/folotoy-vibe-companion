@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import hashlib
+import re
 from pathlib import Path
 import subprocess
 import sys
@@ -40,6 +41,10 @@ class ReleasePackageTests(unittest.TestCase):
             guide = (self.output / f"INSTALL{language}.txt").read_text()
             self.assertIn("BlackHole", guide)
             self.assertNotIn("](install", guide)
+            self.assertIn("Just Works", guide)
+            for link in re.findall(r"\]\(([^)]+)\)", guide):
+                self.assertTrue(link.startswith(("https://", "http://", "#")),
+                                f"standalone release guide has a missing local target: {link}")
         notes = (self.output / "RELEASE_NOTES.md").read_text()
         self.assertIn("Agent", notes)
         self.assertIn("macOS", notes)

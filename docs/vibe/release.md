@@ -41,7 +41,7 @@ Accessibility/local-network permission cannot be silently granted by this app.
 
 The DMG contains the app, an Applications shortcut and both installation guides.
 The ZIP is an alternative containing the same app. Both include app resources
-with license/third-party notices. `SHA256SUMS.txt` uses portable filenames.
+with license/third-party notices. `SHA256SUMS.txt` uses portable filenames. Standalone release installation attachments include the full connection guide, so they remain readable without repository-relative links.
 No Apple certificate or account secrets are used by default.
 
 Optional future Developer ID signing and notarization remain supported by the
@@ -106,7 +106,10 @@ the source tree. The release-package host test checks complete/missing/ambiguous
 payloads, reproducible portable checksums, and retained notices.
 
 PR/push checks include the separate `macos-checks.yml` for native Swift tests and
-universal packaging. The upstream baseline sync is manual-only; publishing this
+universal packaging. Both Mac workflows also run the packaged executable against
+local codec/network fixtures with `tests/vibe/test_radio_playback.py --executable`;
+FFmpeg only generates those test inputs and is not a runtime requirement.
+The upstream baseline sync is manual-only; publishing this
 application must not schedule automatic merges over application work.
 
 Regenerate the README images with `bash tools/render_readme.sh` on a Mac with

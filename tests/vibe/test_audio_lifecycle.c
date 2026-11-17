@@ -106,6 +106,7 @@ vibe_radio_result_t vibe_radio_session(const char *url,bool (*cancel)(void)) {
     v_model.radio_requested=false;return V_RADIO_SESSION_PLAYED;
 }
 
+bool vibe_radio_remote_init(void) { return true; }
 int main(void) {
     fail_pcm_allocate=true;
     assert(vibe_audio_init()==ESP_ERR_NO_MEM && !worker && !capture_pcm && !pcm_live);
@@ -135,7 +136,7 @@ int main(void) {
     assert(starts==5 && ends==5 && packets==4 && !v_status.audio_fault);
     bsp_audio_sleep(); alarm_play(pcm);
     assert(writes==2);
-    bsp_audio_sleep(); v_model.page=V_HOME;v_model.radio_active=true; v_model.radio_requested=true; v_status.wifi=true;
+    bsp_audio_sleep(); v_model.page=V_HOME;v_model.radio_active=true; v_model.radio_requested=true; v_status.wifi=true;v_status.peer=true;v_status.radio_pcm=true;
     process_audio(V_RADIO_CHANGED);
     assert(radios==1 && sleeping && !v_status.audio_busy);
     v_model.page=V_HOME; v_model.recording=true;

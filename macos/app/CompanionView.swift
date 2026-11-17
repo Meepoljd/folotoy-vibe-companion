@@ -14,6 +14,7 @@ enum Palette {
 }
 struct CompanionView:View {
     @ObservedObject var model:AppModel
+    @State private var permissionHelpExpanded=false
     private let sections=[("连接与语音","point.3.connected.trianglepath.dotted"),("设备设置","slider.horizontal.3"),("番茄钟","timer"),("天气","cloud.sun"),("收音机","radio"),("Agent 提醒","bell.badge")]
     var body:some View {
         HStack(spacing:0) {
@@ -79,43 +80,45 @@ struct CompanionView:View {
     private var connection:some View {
         VStack(spacing:16) {
             card("你的 FoloToy","link") {
-                HStack(spacing:16) {
-                    BrandMark(size:48)
-                    VStack(alignment:.leading,spacing:6) { Text(model.state.message).font(.system(size:16,weight:.medium));Text(model.state.connected ? model.state.address : "电脑与设备需连接同一局域网").font(.system(size:11,design:.monospaced)).foregroundStyle(Palette.muted) }
-                    Spacer();Button { model.engine.retry() } label: { Image(systemName:"arrow.clockwise") }.help("重新连接").buttonStyle(.borderless)
-                }
-                if !model.state.paired {
-                    Divider().overlay(Palette.line)
-                    HStack { TextField("设备首页的六位配对码",text:$model.code).textFieldStyle(.roundedBorder).frame(maxWidth:240);Button("配对设备") { model.engine.pair(model.code) }.disabled(!model.state.connected || model.code.count != 6) }
-                }
+                DeviceConnectionView(model:model)
             }
             card("语音通道","waveform") {
-                readiness("音频驱动",detail:model.state.audio ? "BlackHole 2ch" : "安装后，在输入法中选择 BlackHole 2ch",ready:model.state.audio) {
-                    Link(model.state.audio ? "安装说明" : "安装 BlackHole",destination:URL(string:"https://existential.audio/blackhole/")!)
+                readiness("音频驱动",detail:model.state.audio ? "BlackHole 2ch" : "尚未检测到 BlackHole 2ch",ready:model.state.audio) {
+                    Button("重新检测") { model.engine.retry() }
                 }
+                audioSetup
                 Divider().overlay(Palette.line)
-                readiness("快捷键权限",detail:model.state.permission ? "已授权" : "用于发送语音与回车按键",ready:model.state.permission) {
+                readiness("辅助功能授权",detail:model.state.permission ? "已授权" : "允许设备触发语音输入和回车",ready:model.state.permission) {
                     if !model.state.permission { Button(model.permissionChecking ? "正在检查…" : "前往授权") { model.requestKeyboardPermission() }.disabled(model.permissionChecking) }
                 }
                 if !model.state.permission {
-                    Text("更新后若系统中已开启权限，此处仍未就绪，请在“系统设置 → 隐私与安全性 → 辅助功能”中删除旧的 Vibe 伴侣，再重新添加“应用程序”中的新版 App。")
-                        .font(.system(size:11)).foregroundStyle(Palette.muted).fixedSize(horizontal:false,vertical:true)
+                    VStack(alignment:.leading,spacing:8) {
+                        Button { permissionHelpExpanded.toggle() } label: {
+                            HStack(spacing:6) {
+                                Image(systemName:permissionHelpExpanded ? "chevron.down" : "chevron.right")
+                                Text("授权后仍不可用？")
+                                Spacer(minLength:0)
+                            }.padding(.vertical,6).contentShape(Rectangle())
+                        }.buttonStyle(.plain)
+                            .accessibilityValue(permissionHelpExpanded ? "已展开" : "已折叠")
+                        if permissionHelpExpanded {
+                            Text("在“系统设置 → 隐私与安全性 → 辅助功能”中删除旧条目，再添加“应用程序”中的 Vibe 伴侣。")
+                                .foregroundStyle(Palette.muted).fixedSize(horizontal:false,vertical:true)
+                        }
+                    }.font(.system(size:11))
                 }
                 Divider().overlay(Palette.line)
                 VStack(alignment:.leading,spacing:10) {
-                    HStack(spacing:7) {
-                        Text("输入法 · 按住说话").font(.system(size:12,weight:.medium))
-                        Image(systemName:"questionmark.circle").foregroundStyle(Palette.muted)
-                            .help("可对接支持自定义“按住快捷键说话”、能使用 BlackHole 2ch 作为麦克风的输入法。需在输入法中选择 BlackHole，并设置相同的快捷键。目前已实测微信输入法，其他输入法需确认是否接受模拟按键。")
-                            .accessibilityLabel("输入法兼容条件")
+                    HStack {
+                        Text("输入法设置").font(.system(size:12,weight:.medium))
+                        Spacer()
+                        InputMethodSettingsView()
                     }
-                    HStack { TextField("ctrl+option+v",text:$model.shortcut).textFieldStyle(.roundedBorder).font(.system(size:12,design:.monospaced)).frame(width:205);Button("保存快捷键") { model.saveShortcut() } }
-                    Text("在输入法中选择 BlackHole 2ch，并设置相同快捷键。").font(.system(size:11)).foregroundStyle(Palette.muted)
-                        .help("默认使用左 Control＋左 Option＋V。若发生冲突，可尝试加上 Command，并同步修改输入法设置；无法自动检查所有应用的快捷键。")
-                    if Shortcut.hasElevatedConflictRisk(model.shortcut) {
-                        Text(Shortcut.guidance(model.shortcut)).font(.system(size:11)).foregroundStyle(Color.orange).fixedSize(horizontal:false,vertical:true)
-                    }
+                    Text("麦克风选择 BlackHole 2ch，并启用“按住说话”。")
+                        .font(.system(size:11)).foregroundStyle(Palette.muted)
+                    ShortcutSettingsView(model:model)
                 }
+
             }
             if model.state.powerAvailable && model.state.paired {
                 card("待机诊断","bolt.circle") {
@@ -125,6 +128,66 @@ struct CompanionView:View {
                     })
                 }
             }
+        }
+    }
+    private var audioSetup:some View {
+        VStack(alignment:.leading,spacing:12) {
+            if !model.state.audio {
+                audioSetupStep("① 安装 BlackHole 2ch", "两种方式任选一种。")
+                VStack(alignment:.leading,spacing:14) {
+                    HStack(spacing:16) {
+                        VStack(alignment:.leading,spacing:5) {
+                            Text("方式一 · 下载安装包").font(.system(size:12,weight:.medium))
+                            Text("下载并打开安装包。").font(.system(size:11)).foregroundStyle(Palette.muted)
+                        }
+                        Spacer(minLength:0)
+                        Link(destination:URL(string:"https://existential.audio/downloads/BlackHole2ch-0.7.1.pkg")!) {
+                            Label("下载安装包",systemImage:"arrow.down.circle")
+                        }.buttonStyle(.borderedProminent).controlSize(.small).foregroundStyle(Palette.background)
+                    }
+                    HStack(spacing:10) {
+                        Rectangle().fill(Palette.line).frame(height:1)
+                        Text("或").font(.system(size:10)).foregroundStyle(Palette.muted)
+                        Rectangle().fill(Palette.line).frame(height:1)
+                    }
+                    VStack(alignment:.leading,spacing:8) {
+                        Text("方式二 · Homebrew 安装").font(.system(size:12,weight:.medium))
+                        Text("已安装 Homebrew？在终端运行：").font(.system(size:11)).foregroundStyle(Palette.muted)
+                        HStack {
+                            Text("brew install blackhole-2ch").font(.system(size:11,design:.monospaced)).textSelection(.enabled)
+                            Spacer()
+                            Button {
+                                let pasteboard=NSPasteboard.general;pasteboard.clearContents()
+                                model.result=pasteboard.setString("brew install blackhole-2ch",forType:.string) ? "安装命令已复制" : "复制失败，请重试"
+                            } label: { Label("复制命令",systemImage:"doc.on.doc") }
+                                .buttonStyle(.bordered).controlSize(.small)
+                        }.padding(10).background(Palette.background,in:RoundedRectangle(cornerRadius:6))
+                    }
+                }.padding(14).background(Palette.background.opacity(0.5),in:RoundedRectangle(cornerRadius:9))
+                    .overlay(RoundedRectangle(cornerRadius:9).stroke(Palette.line,lineWidth:1))
+                Label {
+                    VStack(alignment:.leading,spacing:5) {
+                        Text("② 安装完成后，重启 Mac").font(.system(size:12,weight:.semibold))
+                        Text("保存工作，重启后重新打开 Vibe 伴侣。").font(.system(size:11)).fixedSize(horizontal:false,vertical:true)
+                    }
+                } icon: { Image(systemName:"restart") }
+                    .foregroundStyle(Palette.accent).padding(12).frame(maxWidth:.infinity,alignment:.leading)
+                    .background(Palette.accent.opacity(0.08),in:RoundedRectangle(cornerRadius:8))
+                audioSetupStep("③ 确认驱动已加载", "重启后点击“重新检测”，或在系统“声音 → 输入”中查看 BlackHole 2ch。")
+            }
+            Button { openSystemMicrophoneSettings() } label: { Label("打开系统麦克风设置",systemImage:"mic") }
+                .buttonStyle(.bordered).controlSize(.small)
+        }
+    }
+    private func openSystemMicrophoneSettings() {
+        if !NSWorkspace.shared.open(URL(string:"x-apple.systempreferences:com.apple.Sound-Settings.extension?input")!) {
+            model.result="无法打开系统设置，请手动前往“系统设置 → 声音 → 输入”。"
+        }
+    }
+    private func audioSetupStep(_ title:String,_ detail:String)->some View {
+        VStack(alignment:.leading,spacing:5) {
+            Text(title).font(.system(size:12,weight:.medium))
+            Text(detail).font(.system(size:11)).foregroundStyle(Palette.muted).fixedSize(horizontal:false,vertical:true)
         }
     }
     private func readiness<Action:View>(_ title:String,detail:String,ready:Bool,@ViewBuilder action:()->Action)->some View {
@@ -205,15 +268,14 @@ struct CompanionView:View {
     }
     private var radio:some View {
         VStack(alignment:.leading,spacing:16) {
-            Text("从电台库加入「我的电台」，拖动调整顺序。设备按这个顺序切换。").font(.system(size:12)).foregroundStyle(Palette.muted).lineSpacing(4)
+            Text("加入「我的电台」后，拖动调整播放顺序。").font(.system(size:12)).foregroundStyle(Palette.muted).lineSpacing(4)
             if model.settings.radio_list_version != 1 { Label("请更新设备固件后管理电台列表",systemImage:"arrow.down.circle").font(.system(size:11)).foregroundStyle(.orange) }
             HStack(alignment:.top,spacing:12) {
                 card("电台库","antenna.radiowaves.left.and.right") {
-                    Picker("来源",selection:$model.radioSource) { Text("推荐").tag(0);Text("搜索").tag(1);Text("自定义").tag(2) }.pickerStyle(.segmented).labelsHidden()
+                    Picker("来源",selection:$model.radioSource) { Text("电台库").tag(0);Text("搜索").tag(1);Text("自定义").tag(2) }.pickerStyle(.segmented).labelsHidden()
                     radioSources
                 }
                 card("我的电台 · \(model.radioStations.count)/\(model.radioCapacity)","list.bullet") {
-                    Text("拖动换序 · 上下箭头也可调整").font(.system(size:10)).foregroundStyle(Palette.muted)
                     if model.radioLoading { ProgressView("正在同步设备…").font(.system(size:11)) }
                     ScrollView {
                         LazyVStack(spacing:6) {
@@ -235,7 +297,7 @@ struct CompanionView:View {
             }.frame(height:363)
         } else {
             VStack(alignment:.leading,spacing:10) {
-                if model.radioSource==0 { TextField("搜索推荐电台",text:$model.radioQuery).textFieldStyle(.roundedBorder) }
+                if model.radioSource==0 { TextField("搜索电台库",text:$model.radioQuery).textFieldStyle(.roundedBorder) }
                 if model.radioSource==1 {
                     HStack(spacing:8) {
                         TextField("搜索电台",text:$model.radioQuery).textFieldStyle(.roundedBorder).frame(minWidth:80,maxWidth:.infinity).onSubmit { model.findStations() }

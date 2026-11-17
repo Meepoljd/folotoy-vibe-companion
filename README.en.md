@@ -8,6 +8,10 @@ Turn a FoloToy AI Passport into a wireless dictation device and an Agent notifie
 Hold a button to speak into your computer. Get a screen wake and a chime when an
 Agent finishes or needs your attention. Keep a timer, weather, or radio nearby.
 
+**Connect over Bluetooth or Wi-Fi.** When office networks cannot admit the device,
+connect directly to your Mac over Bluetooth for dictation, Enter, Agent alerts and
+radio. The computer supplies Internet access for radio.
+
 **The desktop app currently supports macOS 13+ only (Apple Silicon / Intel).
 Windows is not supported yet.**
 
@@ -57,7 +61,7 @@ and verification.
 
 ## Get started
 
-You need a **FoloToy AI Passport**, **macOS 13 or later**, and a reachable local
+You need a **FoloToy AI Passport**, **macOS 13 or later**, and either BLE Bluetooth or a reachable local
 network. The app is a **universal binary for Apple Silicon and Intel**. Voice input
 also requires [BlackHole 2ch](https://existential.audio/blackhole/) and
 [WeType](https://z.weixin.qq.com/) or another compatible hold-to-talk input method.
@@ -68,10 +72,12 @@ also requires [BlackHole 2ch](https://existential.audio/blackhole/) and
    matching Mac app from [GitHub Releases](https://github.com/lialun/folotoy-vibe-companion/releases/latest)
    and move it to Applications. See the [user guide](docs/vibe/README.md) for
    detailed setup and button controls.
-2. **Connect the device to Wi-Fi.** Join its setup hotspot with your phone and
+2. **Connect the device.** Click Connect on the computer and accept with the device’s upper key. Wi-Fi and BLE can stay connected together; see [Device connections](docs/vibe/connections.md).
+   A new device offers Bluetooth, Wi-Fi and Later. BLE requires no Wi-Fi setup.
+   For Wi-Fi, choose Wi-Fi on the device, join its hotspot with your phone and
    select a 2.4 GHz network. It remembers up to five networks and reconnects
    automatically when you move between them.
-3. **Pair the device.** Enter its pairing code in the app. For voice input,
+3. **Set up voice (optional).** In your input method,
    select BlackHole 2ch in your input method, match the hold-to-talk shortcut,
    and grant the app keyboard-control permission. Agent-only use does not need
    voice setup. The [Mac installation guide](docs/vibe/install.md) covers first
@@ -79,7 +85,7 @@ also requires [BlackHole 2ch](https://existential.audio/blackhole/) and
 4. **Add the Agents you use.** Install integrations in **Agent notifications**,
    review any trust prompt in the Agent, then verify a real event.
 
-The device sends microphone audio over the LAN; the input method performs speech
+The device sends microphone audio over the selected LAN or BLE link; the input method performs speech
 recognition under its own settings and service terms. This is not a generic USB
 or Bluetooth microphone. Dictation and Agent delivery require the companion to
 be running and the computer awake; the timer and weather work without it.
@@ -107,10 +113,11 @@ an enabled switch, remove the old entry and add the current app from Application
 
 - **Available implementation:** ESP32-C3 firmware and a macOS client. Windows and
   Linux clients are not implemented.
-- **Validation limits:** Apple Silicon and the target device have been exercised
-  during development. The Intel binary is cross-built; a physical Intel Mac and
-  clean-machine installation still need verification. Radio availability depends
-  on the station, stream format, network, and device resources.
+- **Validation limits:** This iteration has been exercised on an Intel Mac and the
+  target device; the package contains Apple Silicon and Intel binaries. Current
+  Apple Silicon hardware, clean-machine installation, and multiple physical
+  devices/computers still need verification. Radio availability depends on the
+  station, stream format, and network.
 
 ## Build and contribute
 

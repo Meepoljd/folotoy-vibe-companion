@@ -27,7 +27,11 @@ esp_err_t gpio_intr_disable(gpio_num_t pin) { assert(pin==BSP_BTN_GPIO);irq_enab
 esp_err_t gpio_set_intr_type(gpio_num_t pin,gpio_int_type_t type) {
     assert(pin==BSP_BTN_GPIO && type==GPIO_INTR_LOW_LEVEL);return ESP_OK;
 }
-esp_err_t gpio_install_isr_service(int flags) { assert(flags==ESP_INTR_FLAG_IRAM);return fail_isr?ESP_FAIL:ESP_OK; }
+esp_err_t gpio_install_isr_service(int flags) {
+    assert(flags==ESP_INTR_FLAG_IRAM);
+    assert(!irq_enabled && !wake_enabled); /* Retained pad must be safe first. */
+    return fail_isr?ESP_FAIL:ESP_OK;
+}
 esp_err_t gpio_isr_handler_add(gpio_num_t pin,gpio_isr_t handler,void *arg) {
     assert(pin==BSP_BTN_GPIO && !arg && !wake_isr);wake_isr=handler;return ESP_OK;
 }
@@ -200,6 +204,10 @@ static void check_voltage(int mv, int expected) {
     assert(reads - before == CONFIG_ADC_BUTTON_SAMPLE_TIMES);
 }
 int main(void) {
+    /* Simulate the peripheral state retained across a CPU reset, while the
+     * previous ISR and software bookkeeping no longer exist. */
+    irq_enabled = wake_enabled = digital_input = true;
+    retry_success();
     for (int i = 1; i <= BSP_BTN_COUNT; ++i) {
         reset_faults(); fail_create = i;
         assert(bsp_button_init(event_cb, &events) != ESP_OK); retry_success();

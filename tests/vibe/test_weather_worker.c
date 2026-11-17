@@ -17,6 +17,8 @@ SemaphoreHandle_t v_mutex=(void *)1;
 static bool locked,fail_create,fail_parse,change_city,cancel_fetch;
 static uint64_t now=5000;
 static unsigned creates,deletes,fetches,bodies,stack_bytes;
+static bool memory_ready=true;
+bool vibe_weather_memory_ready(size_t pending_stack_bytes) { assert(pending_stack_bytes==8192);return memory_ready; }
 static void (*entry)(void *);
 static jmp_buf parked;
 static void release_body(void *body) {
@@ -70,6 +72,8 @@ bool vibe_air_parse(const char *body,vibe_air_t *out) {
 }
 int main(void) {
     v_prefs.weather_enabled=true;strcpy(v_prefs.city,"Beijing");v_status.wifi=true;
+    now=0;memory_ready=false;vibe_weather_poll(now);assert(!creates && !weather_worker);
+    memory_ready=true;now=5000;
     vibe_weather_poll(now);assert(creates==1 && stack_bytes==8192);
     vibe_weather_pause();assert(!weather_worker && !stack_bytes && deletes==1 && !fetches);
     now=10000;vibe_weather_poll(now);assert(creates==1);

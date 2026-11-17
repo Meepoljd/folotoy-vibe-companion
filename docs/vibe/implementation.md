@@ -58,7 +58,7 @@ three times with an event ID; the Mac deduplicates them, including Enter.
 Config requests have IDs, validation, explicit replies and bounded retries.
 Repeated equal settings do not rewrite NVS. Settings writes report storage errors.
 
-Pairing uses a six-digit on-device code and a random per-Mac token. Subsequent
+Pairing uses a desktop request, physical device approval and a SHA-256 commitment to a random per-Mac token. See [Device connections](connections.md). Subsequent
 control/ready messages require the token; it is stored in an account-local Mac configuration file and
 device NVS. The current app does not call Keychain. JSON size and depth are bounded. This is a trusted-LAN protocol,
 not encrypted transport. No microphone recording, network password or token is
@@ -77,7 +77,7 @@ commit arm a three-second grace period, then the device closes its own hotspot
 and returns Home without another phone request. Failure stays on the same form.
 The page attempts to close itself; ordinary browser tabs may retain the success
 message. Captive popup behavior was confirmed on the user's phone.
-Automatic hotspot setup is offered once during an unconnected startup. A later
+Automatic hotspot setup is offered once during an unconnected startup, unless an authorized BLE link is available. A later
 Wi-Fi outage stays on Home and retries without replacing the page; manual
 network setup remains available in device settings.
 
@@ -87,11 +87,11 @@ or globally replace the computer's microphone. WeType selects BlackHole explicit
 
 ## Power policy
 
-No BLE, idle capture, continuous level meter, animation or cloud connection.
+BLE remains available for discovery and authorized control. There is no idle capture, continuous level meter, animation or cloud connection.
 Idle Wi-Fi uses minimum modem sleep; ESP-IDF automatic light sleep/tickless idle
 is requested. Speech temporarily disables modem sleep for lower latency and
 returns to modem sleep on release. Discovery is every two seconds until found;
-paired operation uses five-second unicast beacons and pings. Weather refreshes
+connected discovery runs every ten seconds; authorized status probes run each second on both available links for three-second failover. Weather refreshes
 every fifteen minutes, backs off after failure and starts only while audio is
 idle. Pairing, settings and button actions are infrequent traffic.
 
@@ -2350,3 +2350,238 @@ matching ELF SHA-256 `e4c4601a8cfb757f304158a6316d4764e6aa7d1c27644e5921c75f2abd
 Archive: `build/firmware/cadb4cbfc648c76afa05b8846f95a51ea2b309406fb6cf9b03dbd773e423acac/`.
 Updated local review package: `.work/release-prep/review-package-power-report-data-only/`.
 No commit, push, tag or publication was made.
+
+
+## Device-confirmed connections checkpoint (2026-11-13)
+
+The desktop now merges LAN/BLE sightings by device identity and requests physical
+approval instead of a numeric code. The device uses its existing right-side key
+rail for Confirm / Cancel / Back. Approval commits a client/request/token digest;
+only a successful NVS write changes the authorized computer. Both links can attach
+to that computer, with one primary business path and automatic fallback.
+
+BLE callbacks only enqueue bounded packets. Metadata reads use a cached snapshot;
+network sends release ownership locks before entering NimBLE/lwIP. Restored CCCD
+subscription can precede CONNECT, so the two-slot registry preserves early state.
+The confirmation is drawn without adding a second widget tree to the LVGL pool.
+Legacy code generation and its status fields have been removed.
+
+Final full-image SHA-256:
+`f30cfe18bbdb81d8017ed8510d2ecb2da480d96b0b209f1493c6932fc6c6564b`.
+Matching ELF SHA-256:
+`af289bb6de85109e16f60a6e9922aa5ec3567cddd57ad91bb70bde20e3062c56`.
+Archive: `build/firmware/f30cfe18bbdb81d8017ed8510d2ecb2da480d96b0b209f1493c6932fc6c6564b/`.
+The verified application was flashed at `0x10000`, preserving NVS. The installed
+universal desktop build is `0.1.0-device-confirmation`.
+
+Build: PASS. Host tests: PASS. Device tests: PASS for matched startup, user-confirmed
+approval/key-rail/cancellation, LAN reconnect and settings, authenticated dual
+links, and the final BLE-only acceptance helper: settings read/acknowledgement,
+radio-list read, Agent acknowledgement and one minute of availability, without
+a LAN socket. No panic or watchdog was observed in the final serial window.
+The brightness write/read test restored the original value 38. Actual voice/Enter
+awaits Accessibility authorization; two physical computers/devices, forced
+mid-voice failover, long RF stress and battery endurance remain unverified.
+No commit, push, tag or publication was made.
+
+
+### Follow-up device checks (2026-11-13)
+
+The user confirmed voice input and a physical lower-key newline. Hold-to-talk now matches left Control + left Shift + V; the IME microphone is explicitly BlackHole 2ch.
+Current application-only candidate full-image hash: `3463fa42897916994053df5a3acafc79414ee9930a01f847932f82b6a5578b00`; matching ELF: `5524de6b17c9112c1cd1ebe95fb7f753bf102b412af24396788643e5d12689c5`. NVS was preserved. Late unsubscription cannot recreate disconnected slots; unchanged advertising mode no longer triggers a restart. The complete gate passed.
+Both BLE-only runs authenticated and completed settings read/write, radio list and Agent acknowledgments, but continuous availability failed with timeout/reconnection. BLE-only voice remains unaccepted. The GUI was restored showing both Wi-Fi and BLE connected.
+
+
+### BLE heap-pressure fix (2026-11-13)
+
+Concurrent serial and desktop logs reproduced BLE_INIT Malloc failed during weather HTTPS handshakes, followed by stalled GATT traffic and reconnection. The optional weather worker now checks internal heap admission before creating its 8 KiB stack and again before HTTP: 48 KiB free and a 20 KiB contiguous block, with pending stack space added before task creation. Insufficient memory defers the request, retains the cache and rechecks at the existing polling cadence. Communications and voice take priority; weather refresh is not guaranteed under sustained memory pressure. Host tests cover insufficient total memory, fragmentation, no worker creation under pressure and recovery.
+
+Verified candidate full-image SHA-256: `d9b084a203205a2ebc83338b937a93853151c27893ef441964375da04cadf54f`; matching ELF: `8877ad049b52bf91a34c679dd53e7e05d4278833a80db1f38fe81f4f554c883d`. Application-only flash preserved NVS. Build: PASS; Host tests: PASS; Device tests: two one-minute BLE-only availability runs passed settings read/write, Agent acknowledgments and radio lists; the second ran after closing the monitor without resetting the device. Matching startup logs contained no BLE allocation failure or panic. The dual-link GUI was restored. Physical BLE-only voice/Enter awaits user readiness; multiple computers/devices, forced mid-voice failover and endurance remain unverified.
+
+Physical BLE-only voice/Enter acceptance: the user confirmed normal input and newline; TextEdit contained recognized speech and line breaks. The normal desktop GUI ran against a temporary firmware that skipped Wi-Fi startup and automatic AP creation without clearing configuration. Test full hash: `a919eba25cbbeecc449116bf9da2e257843842a187814c87c4163af53b26c677`; ELF: `6e2c89ea43c03b94e86c0f6ac550f69a18f4255e0d83c8ac9cdf0bf48f799ae8`. Device capture readiness was 37/44/43/44 ms, not end-to-end recognition latency. Production sources were restored and production candidate `d9b084a2…f54f` was reflashed after acceptance.
+
+
+### First-use connection guide (2026-11-16)
+
+The user approved a welcome page explaining Bluetooth and Wi-Fi, with Bluetooth, Wi-Fi and Later on the physical key rail. The ambiguous Wi-Fi action label was replaced. BLE is discoverable before a choice; only an explicit Wi-Fi action starts the phone hotspot. A device without saved networks leaves its Wi-Fi radio stopped. Later persists independently; paired devices skip onboarding. Wi-Fi completion does not imply computer authorization. Manual setup survives existing BLE heartbeats; cancellation preserves context and networks. Existing users can open the guide from settings, where unpairing is explicitly named.
+
+Production full-image SHA-256: `6eed5a42f54af6225f97f72ff65ee77f8e4dcd9e2c1f6e7f1749922909549f83`; matching ELF: `232276a46e5cd570cf8a19317344657cb28245f94dd46d8f37bbba86dd15efa3`. The complete gate passed. Host checks include 100 onboarding cycles, remembered skip, failed persistence, late setup closure, authorization boundaries and the expanded wake matrix. Actual LVGL checks passed both themes, 600 guide transitions, Wi-Fi key-rail fit, confirmation overlays and unchanged-redraw checks. The retained glyph inventory covers all 678 used non-ASCII characters.
+
+Desktop `0.1.0-onboarding` adds bounded BLE failure backoff and a distinction between an outgoing request and device-acknowledged confirmation. Universal compilation, native regression tests, strict signature and DMG verification passed; the app is installed. LAN reconnection worked. Device/system logs correlated the target peripheral with an explicit macOS connection deny-list entry after repeated failures. Backoff is observed, but pure BLE recovery is not accepted yet. A diagnostic fresh-state fixture preserved saved networks; an APB-lock experiment was inconclusive under the OS block. Production contains neither test override nor diagnostic power lock. Accessibility refresh awaits user Touch ID. Physical guide acceptance, fresh BLE pairing and multi-computer/device endurance remain pending. No commit, push or release was made.
+
+
+### BLE unpair/reconnect correction (2026-11-16)
+
+Pure-BLE first pairing reached physical approval and authenticated normally. The user then reproduced a reconnect failure after using device Unpair. Device-side release erased NimBLE encryption bonds while macOS retained its keys, producing `CBErrorDomain` 14 (peer removed pairing information). Application unpair now retains the encrypted OS bond, revokes the application token, and notifies old endpoints immediately. A new physical approval is still required; stale release generations cannot revoke a newer owner. The actual release/ingress host test covers 100 repeated unpair/re-pair cycles.
+
+The desktop identifies this explicit lost-bond error, stops automatic retries, and offers system Bluetooth settings plus a manual retry that preserves a healthy LAN session. Native tests cover error-domain classification, retry suspension, per-device isolation and stale callbacks. Desktop `0.1.0-onboarding.1` passed universal native tests, strict signature and DMG verification and is installed. Existing Accessibility authorization has been refreshed. Production full SHA-256: `e6b8e157757e623bd7776db80e22a1220a756c0304a0fb772fa8949e326dcdf3`; matching ELF: `59547f9ed023cbfb94df5f7359b7584b32b85cfef82dbe06a22ff5e3ec1a604a`. The complete gate passed.
+
+The device is temporarily running a BLE-only acceptance fixture built from the same application, with saved Wi-Fi profiles disabled in RAM and protected against writes. Its full SHA-256 is `46a7ebdd4786fbaa09e65fb38b7023964eb4e1c65b97a953c944a3e385b8882a`. The already-stale macOS bond was cleared once; a subsequent physical BLE pairing succeeded. The user repeated device Unpair, clicked Connect in the desktop, physically approved again, and confirmed successful BLE reconnection without removing the OS bond. Pure-BLE voice and Enter were subsequently confirmed by the user and observed as recognized text plus newlines in TextEdit. The failed first attempt occurred with OS Accessibility disabled during an operator grant-refresh mistake while in-process preflight remained stale; after restoring the actual system switch and relaunching the GUI, both worked. Two recorded Bluetooth voice runs received 23 and 41 packets with zero sequence drops; these are short observations, not latency or endurance acceptance. Ordinary desktop Disconnect/Reconnect also recovered an authenticated BLE connection without another physical approval. The verified production application was restored at `0x10000`, leaving NVS untouched. Startup matched the recorded ELF, retained BLE encryption and application authorization, and resumed the saved Wi-Fi connection. Both the real GUI and business-transport log confirmed Wi-Fi and BLE attached together. The bounded observation contained no crash signature. Multiple physical computers/devices and endurance remain unverified; this is not release acceptance.
+
+## 2026-11-16–17 — Computer radio and release-candidate acceptance
+
+The shipping radio path now fetches and decodes MP3/AAC/HLS on the Mac using
+Apple frameworks, then sends independently decodable IMA blocks over UDP or
+BLE. No device radio HTTP/TLS or compressed-source decoder runs. Format 2 uses
+16 kHz mono, 804-byte blocks, sixteen receiver slots (1.6 s) and twelve-block
+prefill (1.2 s). Encoded blocks, metadata and PCM total 16,160 B on ESP32-C3,
+excluding I2S, ingress and allocator overhead. Sixteen separate allocations
+survive post-voice heap fragmentation. High-frequency detail is reduced; audible
+quality still requires human acceptance. The new desktop advertises both formats
+and still serves legacy 24 kHz devices; new firmware requires format-2 capability.
+
+The Mac decoder no longer mistakes a single AAC-like header inside MP3 payload
+for an AAC stream. The legacy RFI double-slash path is repaired at fetch time.
+Stopping a player cancels its worker; only that worker invalidates URLSession
+after exiting requests, fixing the reproduced stop-before-start exception.
+Receiver receipts prune queued duplicate BLE media. Repairs start within half
+the larger cache. After changing media routes, a one-second settle period and
+600 ms holds renewed only by advancing current-route media receipts prevent
+rapid returns to a failed route. Physical disconnection still falls back at once.
+
+An immediate BLE parameter request collided with initial link procedures and
+left this Mac at a measured 360 ms supervision timeout. Parameter requests now
+run after a one-second settle period on the NimBLE queue, with completion/actual
+parameter checks, bounded retries and no idle periodic timer. The observed
+accepted connection is 30 ms with six-second supervision. A 15-ms-only trial
+was rejected by this central and is not shipped. Wi-Fi now scans matching APs
+and sorts by signal on each connection attempt. Dynamic RX/TX limits are four
+each; the previous 12/12 configuration recorded failed 1,700-byte allocations.
+No heap allocation failure was recorded in the bounded-buffer fixture tests.
+
+Normal full-image SHA-256:
+`365ff4286472e2ac4604b9f60557a12d54673e46d9aa1e99d322d155b85c1935`.
+Matching ELF:
+`0bac64cc40b4b928c48459e30e0331835054b5d537222413fda82b8c7209646c`.
+The complete repository gate passed. Desktop `0.1.0-rc.12` universal executable
+SHA-256: `6f7b34b864be0a211896fcf378c02b7cbae9d5b4309bd9a67f4f8fd469d84b7a`.
+Universal compilation, native protocol/Agent tests, bit-exact C/Swift vectors,
+both codec formats, HTTP/HLS/ICY errors/cancellation, 300 immediate radio stops,
+stalled-header/body cancellation, strict signature, DMG and ZIP contents passed.
+Weather cancellation now leaves session invalidation to its worker as well;
+300 immediate cancellations and stalled-response cleanup passed without external
+weather requests. Both Mac CI workflows now run the packaged executable against
+local codec/network fixtures; FFmpeg only generates test inputs. Both standalone
+and packaged-executable test modes passed locally. Remote Actions were not run.
+Offline bilingual guides and portable payload checksums passed verification.
+End users need no external decoder runtime.
+
+Automated device checks used one ESP32-C3 and an Intel Mac on macOS 26.7.3.
+Private fixtures sharing the radio, codec and BLE parameter implementation were muted; synthetic capture was zeroed before
+encoding. Their SDK defaults matched production. Extra serial observers and a
+USB sleep lock were private test scaffolding, not shipping features. The radio
+soak predates the final AP/reply-routing corrections, which were tested separately
+on the final normal image. Identities:
+
+- Radio/fault/soak fixture full SHA-256:
+  `c3fbc1474b182d52528d1a29496a14f6302034c440ba2f915cee4976579a8d83`;
+  ELF `5364080a4d90f8bcd3341de21bc17ec295941f677ceb8b073f2c7f3948a05548`.
+- Reconnect/warm-boot fixture full SHA-256:
+  `f5ba51df49b0b338b00a4a949f1c3a8f9978a234d60803cbdcbf1998d1e84b3a`;
+  ELF `5eefd5f5692e9f8ddf3706f6c817d9b1309090159dac649372d1c4edcc646a81`.
+
+Each AP now receives two bounded retries before trying the next candidate; a
+weaker AP can still be selected. Timed-out power reads retry both available paths,
+and the device returns those replies on both paths, so a BLE request cannot be
+forced back onto failed Wi-Fi. This read retry does not duplicate ordinary writes.
+Completed checks:
+
+- Eight media-fault cases, including both directions of one-way media loss,
+  temporary total loss, bounded permanent failure and explicit retry: PASS.
+- Fifteen control cases, including unchanged-volume ACK, Agent priority/resume,
+  five disconnect/reconnect cycles and power read: PASS.
+- Eleven Wi-Fi/BLE/dual transitions: PASS; exactly one stream played 2,051 blocks,
+  zero underruns and no failure. All fifteen saved stations decoded and played.
+- Thirty-minute single-session BLE/Wi-Fi/dual soak: PASS; 18,547 blocks, zero
+  underruns, no failure, one session, all six segments at 10.0 blocks/s, cleanup PASS.
+- One hundred disconnect/reconnect cycles, ten radio resumes, then settings,
+  power, Agent and heap cleanup: all 114 checks PASS. External weather refresh
+  was paused during stress after the independent real BLE weather check.
+- Fresh weather/air data over BLE with device Wi-Fi stopped: PASS, twelve hours.
+- User station selection restored to index 2 and persisted across warm restart;
+  both authorized links recovered: all three checks PASS.
+- Current bounded-buffer fixtures recorded zero heap-allocation failures and
+  no panic/watchdog signature. Earlier failed experiments remain local and are
+  not counted as passes. Intentional total outages and arbitrary RF conditions
+  are not a promise of gapless playback.
+
+The verified normal application was restored at `0x10000`, preserving NVS, and
+startup matched the normal ELF above. Private hooks and test power locks are
+absent. Desktop RC12 is installed in Applications; previous versions were kept
+in a local backup. The installed production executable passed one-minute BLE-only
+acceptance on normal firmware: settings read/unchanged write, radio list, Agent
+ACK and continuous availability. In the final two-minute idle check, all 120 samples had fresh data on both
+links; final settings, power and Agent replies passed.
+The final normal image also passed ten bidirectional selective Wi-Fi power-read
+failures and five verified USB reboots with authorized recovery. RSSI across the
+five boots was -57/-81/-56/-80/-57 dBm, supporting the need for weak-path fallback.
+Final review artifacts are in `build/release-candidate-20261117-rc12/`.
+
+### User-assisted acceptance (2026-11-17)
+
+The existing Accessibility entry was refreshed, and the running RC12 GUI showed
+authorized status. Physical input logs reported permission granted. The user
+confirmed real voice input and Enter in TextEdit on the normal firmware, then
+confirmed audible radio quality, voice preemption and automatic radio resume.
+
+Pure-BLE acceptance used an isolated firmware that only skipped Wi-Fi startup
+and retries while Wi-Fi was stopped; saved profiles were preserved. Full SHA-256:
+`57025f3bc203d88233cd2372cba33808c6d6188f5584de12d2bef044ba0de70e`;
+ELF `2368ca91e0ba5c434cef19dae25e02fb4def3fff2ead53c8a69704ce8dee6e68`.
+It passed the firmware build/merged-image gate. It had no audio mute, private
+serial commands or extra sleep lock. The installed RC12 GUI stayed running,
+showed Bluetooth-only connectivity and authorized input. Completed checks:
+
+- Real BLE voice/Enter, with observed text and newlines; a 45-packet capture had
+  zero sequence drops. This short run is not a latency/endurance measurement.
+- Audible BLE radio, voice preemption and automatic resume.
+- Desktop Disconnect/Reconnect without new physical approval, followed by
+  Unpair/Reconnect with a fresh physical UP approval, preserving the OS bond.
+- Both installed bridge entries delivered synthetic Codex completion and Claude
+  approval events through the running GUI to the device. The user saw both
+  alerts; no real Agent job was executed for this test.
+
+The exact normal image `365ff428…c1935` was then restored at `0x10000` without
+writing NVS. Startup matched ELF `0bac64cc4…`, and the renewed credential, saved
+networks, Wi-Fi/BLE connectivity and input permission survived restoration.
+A final physical voice/Enter check after the fresh pairing and normal restoration
+also passed. The user confirmed phone hotspot setup: network scan, save and connection.
+The normal GUI remains open, both links are connected, and device reminders are
+restored ON. No temporary firmware or serial observer remains active.
+
+Build: PASS. Host tests: PASS. Device tests: PASS within the automated and
+user-assisted scopes above. Local core functional acceptance is complete.
+**Overall release validation remains open:** the user explicitly deferred power
+and battery-only standby/wake checks to an independent later test. Instrumented
+current/endurance, clean Apple Silicon/macOS 13 installation, physical
+multiple-computer/device operation and remote release CI remain NOT RUN.
+Only one physical Mac and one device were available for this acceptance.
+No commit, push, tag or publication was performed.
+
+### Wi-Fi setup popup responsiveness (2026-11-17)
+
+While the setup hotspot is active, the network task waits on both the control
+and captive-DNS sockets. DNS requests wake it immediately and are drained in
+batches of at most eight, instead of waiting for each control receive timeout.
+Normal operation outside setup keeps the existing receive path. This removes
+device-side DNS queueing delays; the phone still controls captive-page detection
+and popup timing.
+
+The device Wi-Fi screen now instructs the user to connect to its hotspot and
+wait for the phone's configuration page. If it has not appeared after ten
+seconds, the user can open `http://192.168.4.1/` in a browser. Dark/light previews
+include the normal and connection-error states. Loopback tests cover DNS-only
+wakeups, bounded A/AAAA probe bursts, malformed datagrams and concurrent control
+traffic. Phone popup timing is checked separately on a physical phone.
+
+The complete gate passed, as did 100 sanitizer-enabled UDP test runs and the
+600-transition LVGL preview. Verified full image:
+`f76af1e979f46d95a11ef9fe8a337a0021c037435fdd94ed7ed63a6c750448d7`;
+matching ELF: `cc02f8fcebac8f743c79c78f40c58d74f8de39e26308677c1f490e20dca5e1ce`.
+The compatible application was flashed at `0x10000` without writing NVS.
+Bounded startup observation matched the ELF and showed no fault signature;
+the unchanged RC12 GUI reconnected over both Wi-Fi and BLE. The serial port was
+released. The user confirmed clear on-device instructions and an automatic
+phone popup after approximately five seconds. This is a user estimate for one
+phone, not a controlled before/after comparison. Manual browser access was not
+exercised in this follow-up because the page appeared automatically.

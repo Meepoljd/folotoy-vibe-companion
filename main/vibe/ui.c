@@ -1,10 +1,12 @@
 #include "vibe.h"
+#include "portal.h"
 #include "radio/catalog_service.h"
 #include "bsp_display.h"
 #include "lvgl.h"
 #include <stdio.h>
 #include <string.h>
 #include <time.h>
+#include <stdatomic.h>
 #ifdef VIBE_UI_PREVIEW
 #include <assert.h>
 #endif
@@ -45,6 +47,8 @@ static uint32_t graphic_color(uint32_t ink) {
     return ink;
 }
 static lv_obj_t *screen,*clock_text,*wifi_bars[3],*battery;
+static bool status_ble,status_wifi;
+static const lv_area_t status_link_area={12,6,45,25};
 static lv_obj_t *home,*voice_state,*voice_hint,*voice_value,*wave_image;
 static lv_obj_t *module_root,*module_heading,*module_value,*module_text[27],*progress,*progress_fill;
 static int module_kind=-1;
@@ -151,15 +155,25 @@ static void create_page(vibe_page_t kind) {
     box(page_back,3,0,10,2,MUTED,0);
     lv_obj_t *back=label(page_back,0,6,16,&lv_font_montserrat_14,MUTED);put(back,LV_SYMBOL_LEFT);
 }
+static void status_ble_draw(lv_event_t *event) {
+    if (!status_ble) return;
+    lv_draw_label_dsc_t text;lv_draw_label_dsc_init(&text);
+    text.font=&lv_font_montserrat_16;text.color=lv_color_hex(graphic_color(ACCENT));
+    text.text=LV_SYMBOL_BLUETOOTH;text.text_static=1;
+    int x=status_wifi?28:17;lv_area_t area={x,6,x+17,25};
+    lv_draw_label(lv_event_get_layer(event),&text,&area);
+}
 static void create_status(void) {
-    for (int i=0;i<3;i++) wifi_bars[i]=box(screen,18+i*5,23-(4+i*3),3,4+i*3,ACCENT,1);
-    clock_text=label(screen,40,6,108,&lv_font_montserrat_16,INK);
+    for (int i=0;i<3;i++) wifi_bars[i]=box(screen,12+i*5,23-(4+i*3),3,4+i*3,ACCENT,1);
+    clock_text=label(screen,49,6,99,&lv_font_montserrat_16,INK);
     // Reuse the existing label: right alignment anchors the icon while the
     // percentage grows leftwards, including 100%, inside the rounded inset.
     battery=label(screen,151,6,69,&lv_font_montserrat_16,INK);
     lv_obj_set_style_text_align(battery,LV_TEXT_ALIGN_RIGHT,0);
 }
 #include "ui_agent.inc"
+#include "ui_onboarding.inc"
+#include "ui_connection.inc"
 void vibe_ui_init(void) {
     vibe_status_t s;vibe_snapshot(NULL,NULL,&s);
     palette=vibe_appearance_light(&s.appearance,time(NULL),s.tz_minutes)?&light_palette:&dark_palette;
@@ -170,7 +184,11 @@ void vibe_ui_init(void) {
     numbers20=lv_font_montserrat_20;numbers20.fallback=&body;
     numbers36=lv_font_montserrat_36;numbers36.fallback=&small;
     screen=box(NULL,0,0,240,320,BG,0);create_status();
+    lv_obj_add_event_cb(screen,status_ble_draw,LV_EVENT_DRAW_POST,NULL);
+    lv_obj_add_event_cb(screen,onboarding_draw,LV_EVENT_DRAW_POST,NULL);
     lv_obj_add_event_cb(screen,agent_popup_draw,LV_EVENT_DRAW_POST,NULL);
+    lv_obj_add_event_cb(screen,connection_popup_draw,LV_EVENT_DRAW_POST,NULL);
+    lv_display_add_event_cb(lv_display_get_default(),connection_frame_finished,LV_EVENT_REFR_READY,NULL);
     lv_screen_load(screen); bsp_lvgl_unlock(); vibe_ui_refresh();
 }
 static unsigned home_lines;
@@ -278,7 +296,13 @@ void vibe_ui_refresh(void) {
     }
     put(clock_text,clock);
     int strength=s.wifi && s.signal.valid?(int)s.signal.bars:0;
-    for (int i=0;i<3;i++) tint(wifi_bars[i],i<strength?graphic_color(ACCENT):EDGE);
+    for (int i=0;i<3;i++) {
+        show(wifi_bars[i],s.wifi);
+        tint(wifi_bars[i],i<strength?graphic_color(ACCENT):EDGE);
+    }
+    if (status_ble!=s.ble_peer || status_wifi!=s.wifi) {
+        status_ble=s.ble_peer;status_wifi=s.wifi;lv_obj_invalidate_area(screen,&status_link_area);
+    }
     const char *battery_icon=s.battery<0?LV_SYMBOL_BATTERY_EMPTY:s.battery>80?LV_SYMBOL_BATTERY_FULL:s.battery>55?LV_SYMBOL_BATTERY_3:s.battery>30?LV_SYMBOL_BATTERY_2:s.battery>10?LV_SYMBOL_BATTERY_1:LV_SYMBOL_BATTERY_EMPTY;
     if (s.battery>=0 && s.battery<=100) snprintf(text,sizeof(text),"%d%% %s",s.battery,battery_icon);
     else snprintf(text,sizeof(text),"--%% %s",LV_SYMBOL_BATTERY_EMPTY);
@@ -287,17 +311,23 @@ void vibe_ui_refresh(void) {
         radio_slide_stop();
         if (home) { lv_obj_delete(home); home=NULL; }
         if (page) { lv_obj_delete(page); page=NULL; }
-        if (m.page==V_HOME) create_home(); else create_page(m.page);
+        if (m.page==V_HOME) create_home();
+        else if (!vibe_model_connection_page(m.page) && m.page!=V_PROVISION) create_page(m.page);
         drawn_page=m.page;
     }
-    if (m.page==V_HOME) {
+    onboarding_refresh(&m,&s);
+    if (vibe_model_connection_page(m.page) || m.page==V_PROVISION) {
+        /* Drawn on the root above, with the same physical key rail. */
+    } else if (m.page==V_HOME) {
         const char *state="语音输入就绪",*hint="",*value="";
         if (m.recording) { state="正在输入";hint="松开上键，完成输入";snprintf(text,sizeof(text),"%02u:%02u",(unsigned)((now-m.recording_since_ms)/60000),(unsigned)((now-m.recording_since_ms)/1000%60));value=text; }
-        else if (!s.wifi) { state="等待网络";hint="Wi-Fi 正在重新连接"; }
-        else if (!s.token[0]) { state="连接电脑";hint="在客户端输入配对码";value=s.pair_code; }
+
+        else if (!s.wifi && !s.ble_peer && s.token[0]) { state="等待电脑";hint="请打开伴侣客户端"; }
+        else if (!s.token[0]) { state="连接电脑";hint="请在电脑点击连接"; }
         else if (!s.peer) { state="等待电脑";hint="请打开伴侣客户端"; }
         else if (!s.audio_ready || !s.hotkey_ready) { state="语音未就绪";hint="在客户端完成语音设置"; }
         else if (s.audio_fault) { state="请再试一次";hint="按住上键重试音频"; }
+        else { hint=s.wifi?(s.ble_peer?"Wi-Fi / BLE":"Wi-Fi"):"BLE"; }
         put(voice_value,value);put(voice_state,state);put(voice_hint,hint);
         uint32_t voice_color=m.voice_ready || m.recording?ACCENT:MUTED;
         text_color(voice_state,m.voice_ready || m.recording?ACCENT:INK);text_color(voice_value,ACCENT);
@@ -358,7 +388,7 @@ void vibe_ui_refresh(void) {
             }
         } else if (m.page==V_SETTINGS_PAGE) {
             put(page_title,"设备设置"); subtitle(&m,&s,"");
-            const char *names[]={"屏幕亮度","设备音量","自动息屏","屏幕主题","重新配网","解除电脑配对"};
+            const char *names[]={"屏幕亮度","设备音量","自动息屏","屏幕主题","连接电脑","Wi-Fi","解除配对"};
             const char *themes[]={"暗色","亮色","自动"};
             for (int i=0;i<V_SETTING_COUNT;i++) {
                 text[0]=0;
@@ -375,7 +405,7 @@ void vibe_ui_refresh(void) {
             text_color(page_value,m.timer_break?REST_COLOR:FOCUS_COLOR);
         } else if (m.page==V_RADIO_EXIT) {
             put(page_title,"退出收音机？");
-            const char *state=!m.radio_count?"暂无电台":!s.wifi?"等待 Wi-Fi":!m.radio_requested?"已停止":
+            const char *state=!m.radio_count?"暂无电台":!s.peer?"等待电脑":!s.radio_pcm?"请更新电脑客户端":!m.radio_requested?"已停止":
                 s.radio_state==V_RADIO_ERROR?"连接失败":s.radio_state==V_RADIO_PLAYING?"正在播放":
                 s.radio_state==V_RADIO_BUFFERING?"正在缓冲":"正在连接";
             subtitle(&m,&s,state);put(page_value,m.radio_count?s.radio_name:"");text_color(page_value,INK);
@@ -387,6 +417,9 @@ void vibe_ui_refresh(void) {
             row(4,"没弹出？192.168.4.1","",false,false);
         }
     }
+    bool requesting=s.connection_request.phase==V_CONNECT_PENDING;
+    connection_popup_refresh(&s);
+    if (requesting) s.agent_alert.visible=false;
     agent_popup_refresh(&m,&s);
     bsp_lvgl_unlock();
 }

@@ -214,6 +214,14 @@ esp_err_t bsp_button_init(bsp_btn_cb_t cb, void *user) {
 
     s_cb = cb; s_user = user;
 
+    /* A CPU/software reset can retain the pad's low-level wake interrupt.
+     * Quiesce our pin before ADC setup disables its digital input and before
+     * installing the new GPIO ISR service. Otherwise the retained source can
+     * interrupt continuously before key_wake_isr has been registered. */
+    esp_err_t wake_result = gpio_intr_disable(BSP_BTN_GPIO);
+    if (wake_result == ESP_OK) wake_result = gpio_wakeup_disable(BSP_BTN_GPIO);
+    if (wake_result != ESP_OK) return wake_result;
+
     // BSP owns one ADC unit and one calibration handle for polling and reads.
     const adc_oneshot_unit_init_cfg_t ucfg = { .unit_id = BSP_BTN_ADC_UNIT };
     esp_err_t ae = adc_oneshot_new_unit(&ucfg, &s_adc);
@@ -245,7 +253,7 @@ esp_err_t bsp_button_init(bsp_btn_cb_t cb, void *user) {
 
     /* ADC setup disables the digital input. Re-enable it only while idle;
      * preserve the external 10k pull-up and analog divider thresholds. */
-    esp_err_t wake_result = gpio_install_isr_service(ESP_INTR_FLAG_IRAM);
+    wake_result = gpio_install_isr_service(ESP_INTR_FLAG_IRAM);
     if (wake_result == ESP_OK || wake_result == ESP_ERR_INVALID_STATE) {
         wake_result = gpio_set_intr_type(BSP_BTN_GPIO, GPIO_INTR_LOW_LEVEL);
         if (wake_result == ESP_OK) wake_result = esp_sleep_enable_gpio_wakeup();

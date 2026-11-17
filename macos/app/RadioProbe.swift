@@ -7,12 +7,12 @@ enum RadioMedia {
     static func audio(_ bytes:Data)->Format? {
         let b=Array(bytes);guard b.count>=8 else { return nil }
         for i in 0..<min(b.count-7,8192) where b[i]==255 && b[i+1]&0xe0==0xe0 {
-            if b[i+1]&0xf6==0xf0 { // ADTS; device's conservative AAC-LC subset.
+            if b[i+1]&0xf6==0xf0 { // ADTS; decoding and channel conversion run on the Mac.
                 let rates=[96000,88200,64000,48000,44100,32000,24000,22050,16000,12000,11025,8000,7350]
                 let index=Int((b[i+2]>>2)&15),profile=Int(b[i+2]>>6)
                 let channels=Int((b[i+2]&1)<<2 | b[i+3]>>6)
                 let size=Int(b[i+3]&3)<<11 | Int(b[i+4])<<3 | Int(b[i+5]>>5)
-                if index<rates.count,profile==1,(8000...48000).contains(rates[index]),(1...2).contains(channels),size>=7,i+size+2<b.count,b[i+size]==255,b[i+size+1]&0xf6==0xf0 {
+                if index<rates.count,profile<=3,(8000...96000).contains(rates[index]),(1...8).contains(channels),size>=7,i+size+2<b.count,b[i+size]==255,b[i+size+1]&0xf6==0xf0 {
                     return Format(codec:"AAC-LC",sampleRate:rates[index],channels:channels)
                 }
             } else {
@@ -119,7 +119,7 @@ enum RadioProbe {
     static func inspect(_ station:RadioStation,deadline:Date,depth:Int,hls:Bool)throws->RadioStation {
         guard station.valid,depth<4,let url=URL(string:station.url) else { throw RadioFailure.message("直播地址或播放列表层级不受支持") }
         let timeout=deadline.timeIntervalSinceNow;guard timeout>0 else { throw RadioFailure.message("检测超时，请重试") }
-        let (data,response)=try RadioProbeFetch().fetch(url,limit:hls ? 131072:32768,timeout:min(10,timeout))
+        let (data,response)=try RadioProbeFetch().fetch(RadioStation.resolvedStreamURL(url),limit:hls ? 131072:32768,timeout:min(10,timeout))
         let base=response.url ?? url
         let prefix=String(decoding:data.prefix(256),as:UTF8.self).trimmingCharacters(in:.whitespacesAndNewlines).lowercased()
         if prefix.hasPrefix("<!doctype") || prefix.hasPrefix("<html") { throw RadioFailure.message("这是网页地址，请填写直播音频地址") }
@@ -127,26 +127,26 @@ enum RadioProbe {
             guard let list=String(data:data,encoding:.utf8),data.count<32768 else { throw RadioFailure.message("播放列表过大或格式无效") }
             let lines=list.components(separatedBy:.newlines).map { $0.trimmingCharacters(in:.whitespacesAndNewlines) }
             let isHLS=lines.contains { $0.hasPrefix("#EXT-X-") }
-            if lines.contains(where:{ ($0.hasPrefix("#EXT-X-KEY:") && $0 != "#EXT-X-KEY:METHOD=NONE") || $0.hasPrefix("#EXT-X-MAP:") || $0.hasPrefix("#EXT-X-BYTERANGE:") }) { throw RadioFailure.message("设备暂不支持此 HLS 加密或分片格式") }
+            if lines.contains(where:{ ($0.hasPrefix("#EXT-X-KEY:") && $0 != "#EXT-X-KEY:METHOD=NONE") || $0.hasPrefix("#EXT-X-MAP:") || $0.hasPrefix("#EXT-X-BYTERANGE:") }) { throw RadioFailure.message("暂不支持此 HLS 加密或分片格式") }
             var next:String?
             if lines.contains(where:{$0.hasPrefix("#EXT-X-STREAM-INF:")}) {
                 var best=Int.max
                 for (i,line) in lines.enumerated() where line.hasPrefix("#EXT-X-STREAM-INF:") && i+1<lines.count {
                     let lower=line.lowercased()
-                    guard !lower.contains("resolution="),!lower.contains("avc"),!lower.contains("hvc"),!lower.contains("hev"),!lower.contains("vp09"),!lower.contains("av01"),lower.contains("mp4a") || lower.contains("mp3") else { continue }
+                    guard !lower.contains("resolution="),!lower.contains("avc"),!lower.contains("hvc"),!lower.contains("hev"),!lower.contains("vp09"),!lower.contains("av01"),!lower.contains("codecs=") || lower.contains("mp4a") || lower.contains("mp3") else { continue }
                     let value=line.components(separatedBy:"BANDWIDTH=").dropFirst().first.map { String($0.prefix(while:{$0.isNumber})) } ?? ""
                     let bandwidth=Int(value) ?? 0
-                    if bandwidth>0,bandwidth<=192000,bandwidth<best { next=lines[i+1];best=bandwidth }
+                    if bandwidth>0,bandwidth<=384000,bandwidth<best { next=lines[i+1];best=bandwidth }
                 }
             } else if isHLS { next=lines.last(where:{!$0.isEmpty && !$0.hasPrefix("#")}) }
             else if prefix.hasPrefix("[playlist]") { next=lines.first(where:{$0.lowercased().hasPrefix("file1=")}).map { String($0.dropFirst(6)) } }
             else { next=lines.first(where:{!$0.isEmpty && !$0.hasPrefix("#")}) }
-            guard let path=next,let target=URL(string:path,relativeTo:base)?.absoluteURL else { throw RadioFailure.message("未找到设备支持的音频流") }
+            guard let path=next,let target=URL(string:path,relativeTo:base)?.absoluteURL else { throw RadioFailure.message("未找到可播放的音频流") }
             let checked=try inspect(RadioStation(name:station.name,url:target.absoluteString),deadline:deadline,depth:depth+1,hls:isHLS)
             return isHLS ? station : checked // Retain stable playlist URLs, never an expiring segment URL.
         }
         let audio=RadioMedia.transportAudio(data) ?? data
-        guard let format=RadioMedia.audio(audio),RadioMedia.nativePackets(audio,format:format) else { throw RadioFailure.message("尚未识别到设备支持的有效 MP3／AAC 音频，请检查地址或重试") }
+        guard let format=RadioMedia.audio(audio),RadioMedia.nativePackets(audio,format:format) else { throw RadioFailure.message("尚未识别到有效 MP3／AAC 音频，请检查地址或重试") }
         return station
     }
 }

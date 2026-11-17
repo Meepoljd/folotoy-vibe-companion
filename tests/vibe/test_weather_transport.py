@@ -4,6 +4,7 @@ import subprocess
 import tempfile
 ROOT = Path(__file__).resolve().parents[2]
 HEADERS = {
+'esp_heap_caps.h': '#include <stddef.h>\n#define MALLOC_CAP_INTERNAL 1\n#define MALLOC_CAP_8BIT 2\nsize_t heap_caps_get_free_size(unsigned);\nsize_t heap_caps_get_largest_free_block(unsigned);\n',
 'esp_http_client.h': r'''
 #pragma once
 #include <stdbool.h>
@@ -39,6 +40,9 @@ static unsigned calls,cleanups,waits;
 static int mode;
 static uint64_t now;
 static bool permitted=true;
+static size_t free_bytes=64*1024,largest_bytes=32*1024;
+size_t heap_caps_get_free_size(unsigned caps){assert(caps==3);return free_bytes;}
+size_t heap_caps_get_largest_free_block(unsigned caps){assert(caps==3);return largest_bytes;}
 bool allowed(void){return permitted;}
 uint64_t clock_ms(void){return now;}
 void vTaskDelay(unsigned ms){now+=ms;++waits;if(mode==2)permitted=false;}
@@ -57,6 +61,14 @@ int esp_http_client_get_status_code(esp_http_client_handle_t h){(void)h;return m
 bool esp_http_client_is_complete_data_received(esp_http_client_handle_t h){(void)h;return mode!=7;}
 void esp_http_client_cleanup(esp_http_client_handle_t h){assert(h==&handle);++cleanups;}
 int main(void){
+ assert(vibe_weather_memory_ready(8192));
+ free_bytes=48*1024+8191;assert(!vibe_weather_memory_ready(8192));
+ free_bytes=48*1024;assert(vibe_weather_memory_ready(0));
+ largest_bytes=20*1024-1;assert(!vibe_weather_memory_ready(0));
+ calls=cleanups=0;assert(!vibe_weather_fetch("https://weather.test",allowed,clock_ms));assert(!calls && !cleanups);
+ largest_bytes=32*1024;free_bytes=48*1024-1;
+ assert(!vibe_weather_fetch("https://weather.test",allowed,clock_ms));assert(!calls && !cleanups);
+ free_bytes=64*1024;
  for(mode=0;mode<=8;++mode){
  calls=cleanups=waits=0;now=0;permitted=true;
  char *body=vibe_weather_fetch("https://weather.test",allowed,clock_ms);

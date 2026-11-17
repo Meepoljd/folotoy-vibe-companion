@@ -37,6 +37,12 @@ enum PairingStore {
             return true
         } catch { return false }
     }
+    static func remove(_ device:String,directory:URL=directory) {
+        let file=directory.appendingPathComponent("pairing.json")
+        guard let data=try? Data(contentsOf:file),var pairs=try? JSONDecoder().decode([String:String].self,from:data) else { return }
+        pairs.removeValue(forKey:device)
+        if let data=try? JSONEncoder().encode(pairs) { try? data.write(to:file,options:.atomic);try? FileManager.default.setAttributes([.posixPermissions:0o600],ofItemAtPath:file.path) }
+    }
     static func random()->String {
         var generator=SystemRandomNumberGenerator()
         return (0..<32).map { _ in String(format:"%02x",UInt8.random(in:0...255,using:&generator)) }.joined()

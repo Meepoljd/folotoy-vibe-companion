@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import re
 from pathlib import Path
 
 
@@ -31,7 +32,13 @@ def main() -> None:
             parser.error(f"missing or empty release file: {path.name}")
     for language in ("", ".zh_CN"):
         path = output / f"INSTALL{language}.txt"
-        path.write_text(document(root / f"docs/vibe/install{language}.md"), encoding="utf-8")
+        connections = f"connections{language}.md"
+        guide = document(root / f"docs/vibe/install{language}.md")
+        # Release attachments are read outside the repository/DMG. Include the
+        # referenced connection guide instead of leaving an unpublished relative link.
+        guide = re.sub(r"\[([^\]]+)\]\(" + re.escape(connections) + r"\)", r"\1", guide)
+        guide += "\n\n" + document(root / "docs/vibe" / connections)
+        path.write_text(guide, encoding="utf-8")
         files.append(path)
     notes = [document(root / f"docs/vibe/release-notes{language}.md")
              for language in (".zh_CN", "")]

@@ -144,3 +144,64 @@ void vibe_weather_plot(const int temperatures[6],const bool valid[6],int y[6]) {
     int center=low+high;
     for (unsigned i=0;i<6;i++) y[i]=valid[i]?169-(2*temperatures[i]-center)*32/(2*span):169;
 }
+
+/* Compact computer cache. Units are protocol-defined: m/s and UVI in tenths,
+ * PM2.5 in tenths of micrograms/m3, AQI on the US scale. Parse atomically and
+ * reject invalid optional values instead of turning them into plausible zeros. */
+static bool cache_int(const cJSON *array,int index,int low,int high,int *value) {
+    const cJSON *n=cJSON_GetArrayItem(array,index);
+    if(!cJSON_IsNumber(n) || !isfinite(n->valuedouble) || n->valuedouble<low || n->valuedouble>high || floor(n->valuedouble)!=n->valuedouble) return false;
+    *value=(int)n->valuedouble;return true;
+}
+static bool cache_optional(const cJSON *array,int index,int high,int *value,bool *valid) {
+    const cJSON *n=cJSON_GetArrayItem(array,index);
+    *valid=n && !cJSON_IsNull(n);
+    if(!*valid) return true;
+    return cache_int(array,index,0,high,value);
+}
+bool vibe_weather_cache_parse(const cJSON *sample,vibe_weather_t *out,vibe_air_t *out_air) {
+    if(!sample || !out || !out_air) return false;
+    const cJSON *current=cJSON_GetObjectItemCaseSensitive(sample,"current"),*days=cJSON_GetObjectItemCaseSensitive(sample,"days"),*hours=cJSON_GetObjectItemCaseSensitive(sample,"hours");
+    if(!cJSON_IsArray(current) || !cJSON_IsArray(days) || cJSON_GetArraySize(current)!=10 || cJSON_GetArraySize(days)!=3 || !cJSON_IsArray(hours) || cJSON_GetArraySize(hours)>VIBE_WEATHER_HOURS) return false;
+    vibe_weather_t w={0};vibe_air_t air={0};int day,stamp,value=0;
+    if(!cache_int(current,0,-90,65,&w.temperature) || !cache_int(current,1,-110,80,&w.feels) ||
+       !cache_int(current,2,0,100,&w.humidity) || !cache_int(current,3,0,360,&w.direction) ||
+       !cache_int(current,4,0,99,&w.code) || !cache_int(current,5,0,1,&day) ||
+       !cache_int(current,8,-50400,50400,&w.tz_seconds) || !cache_int(current,9,1700000000,2100000000,&stamp)) return false;
+    w.is_day=day;w.sampled_at=stamp;
+    if(!cache_optional(current,6,1500,&value,&w.wind_valid)) return false;
+    if(w.wind_valid) w.wind_ms=value/10.0f;
+    if(!cache_optional(current,7,1500,&value,&w.gust_valid)) return false;
+    if(w.gust_valid) w.gust_ms=value/10.0f;
+    for(int i=0;i<3;i++) {
+        const cJSON *row=cJSON_GetArrayItem(days,i);vibe_forecast_t *d=&w.days[i];
+        if(!cJSON_IsArray(row) || cJSON_GetArraySize(row)!=6 || !cache_int(row,0,-90,65,&d->low) || !cache_int(row,1,-90,65,&d->high) ||
+           d->low>d->high || !cache_int(row,2,0,99,&d->code) || !cache_int(row,3,0,100,&d->rain) ||
+           !cache_optional(row,4,500,&value,&d->uv_valid)) return false;
+        if(d->uv_valid) d->uv_tenths=(unsigned)value;
+        if(!cache_optional(row,5,1500,&value,&d->wind_valid)) return false;
+        if(d->wind_valid) d->wind_ms=value/10.0f;
+    }
+    for(int i=0;i<cJSON_GetArraySize(hours);i++) {
+        const cJSON *row=cJSON_GetArrayItem(hours,i);vibe_hour_t *h=&w.hours[i];bool valid;
+        if(!cJSON_IsArray(row) || cJSON_GetArraySize(row)!=4 || !cache_int(row,0,1700000000,2100000000,&stamp) ||
+           (i && stamp<=w.hours[i-1].at)) return false;
+        h->at=stamp;
+        const cJSON *temperature=cJSON_GetArrayItem(row,1);
+        if(temperature && !cJSON_IsNull(temperature)) {if(!cache_int(row,1,-90,65,&h->temperature))return false;h->fields|=V_HOUR_TEMP;}
+        if(!cache_optional(row,2,100,&value,&valid)) return false;
+        if(valid){h->probability=value;h->fields|=V_HOUR_PROB;}
+        if(!cache_optional(row,3,9990,&value,&valid)) return false;
+        if(valid){h->rain_tenths=(unsigned)value;h->fields|=V_HOUR_RAIN;}
+        ++w.hour_count;
+    }
+    const cJSON *a=cJSON_GetObjectItemCaseSensitive(sample,"air");
+    if(a && !cJSON_IsNull(a)) {
+        if(!cJSON_IsArray(a) || cJSON_GetArraySize(a)!=2 || !cache_optional(a,0,100000,&value,&air.pm25_valid)) return false;
+        if(air.pm25_valid) air.pm25_tenths=(unsigned)value;
+        if(!cache_optional(a,1,10000,&value,&air.aqi_valid)) return false;
+        if(air.aqi_valid) air.aqi=(unsigned)value;
+        air.valid=air.pm25_valid || air.aqi_valid;
+    }
+    w.valid=true;*out=w;*out_air=air;return true;
+}

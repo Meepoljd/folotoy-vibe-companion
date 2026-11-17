@@ -91,6 +91,9 @@ run_static_checks() {
     "${CC:-cc}" -std=c11 -Wall -Wextra -Werror -Imain/vibe \
         tests/vibe/test_model.c main/vibe/model.c -o "${test_dir}/test_vibe_model"
     "${test_dir}/test_vibe_model"
+    "${CC:-cc}" -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined -Imain/vibe \
+        tests/vibe/test_input_gate.c -o "${test_dir}/test_vibe_input_gate"
+    "${test_dir}/test_vibe_input_gate"
     "${CC:-cc}" -std=c11 -Wall -Wextra -Werror -Imain/vibe \
         tests/vibe/test_appearance.c main/vibe/appearance.c main/vibe/prefs.c main/vibe/signal.c -lm -o "${test_dir}/test_vibe_appearance"
     "${test_dir}/test_vibe_appearance"
@@ -117,6 +120,9 @@ run_static_checks() {
         -Itests/vibe/stubs -Itests/audio_stubs -Icomponents/bsp/include -Imain/vibe \
         tests/vibe/test_audio_lifecycle.c main/vibe/adpcm.c -o "${test_dir}/test_vibe_audio"
     "${test_dir}/test_vibe_audio"
+    "${CC:-cc}" -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined -Imain/vibe \
+        tests/vibe/test_radio_stream.c main/vibe/adpcm.c -o "${test_dir}/test_vibe_radio_stream"
+    "${test_dir}/test_vibe_radio_stream"
     "${CC:-cc}" -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined \
         -Itests/vibe/stubs -Itests/audio_stubs -Imain/vibe \
         tests/vibe/test_weather_worker.c -o "${test_dir}/test_vibe_weather_worker"
@@ -133,8 +139,24 @@ run_static_checks() {
     "${CXX:-c++}" -std=c++17 -Wall -Wextra -Werror -fsanitize=address,undefined -pthread -Imain/vibe/radio \
         tests/vibe/test_radio_buffer.cc -o "${test_dir}/test_vibe_radio_buffer"
     "${test_dir}/test_vibe_radio_buffer"
+    "${CC:-cc}" -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined -Imain/vibe \
+        tests/vibe/test_ble_frame.c -o "${test_dir}/test_vibe_ble_frame"
+    "${test_dir}/test_vibe_ble_frame"
+    "${CC:-cc}" -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined -Imain/vibe \
+        tests/vibe/test_ble_media.c -o "${test_dir}/test_vibe_ble_media"
+    "${test_dir}/test_vibe_ble_media"
+    "${CC:-cc}" -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined -Imain/vibe \
+        tests/vibe/test_ble_parameters.c -o "${test_dir}/test_vibe_ble_parameters"
+    "${test_dir}/test_vibe_ble_parameters"
     "${CC:-cc}" -std=c11 -Wno-deprecated-declarations -Itests/vibe/vendor/cjson -c \
         tests/vibe/vendor/cjson/cJSON.c -o "${test_dir}/vibe_json.o"
+    "${CC:-cc}" -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined -Imain/vibe -Itests/vibe/vendor/cjson \
+        tests/vibe/test_connection.c "${test_dir}/vibe_json.o" -lm -o "${test_dir}/test_vibe_connection"
+    "${test_dir}/test_vibe_connection"
+    "${CC:-cc}" -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined \
+        -Itests/vibe/remote_stubs -Itests/vibe/stubs -Itests/audio_stubs -Icomponents/bsp/include -Imain/vibe -Itests/vibe/vendor/cjson \
+        tests/vibe/test_radio_remote.c main/vibe/adpcm.c "${test_dir}/vibe_json.o" -lm -o "${test_dir}/test_vibe_radio_remote"
+    "${test_dir}/test_vibe_radio_remote"
     "${CC:-cc}" -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined \
         -Itests/vibe/power_stubs -Itests/vibe/stubs -Itests/bsp_stubs -Icomponents/bsp/include -Itests/vibe/vendor/cjson \
         tests/vibe/test_power.c "${test_dir}/vibe_json.o" -o "${test_dir}/test_vibe_power"
@@ -142,6 +164,9 @@ run_static_checks() {
     "${CC:-cc}" -std=c11 -Wall -Wextra -Werror -Imain/vibe -Itests/vibe/vendor/cjson \
         tests/vibe/test_weather.c main/vibe/weather.c "${test_dir}/vibe_json.o" -lm -o "${test_dir}/test_vibe_weather"
     "${test_dir}/test_vibe_weather"
+    "${CC:-cc}" -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined -Imain/vibe -Itests/vibe/vendor/cjson \
+        tests/vibe/test_weather_cache.c main/vibe/weather.c "${test_dir}/vibe_json.o" -lm -o "${test_dir}/test_vibe_weather_cache"
+    "${test_dir}/test_vibe_weather_cache"
     "${CC:-cc}" -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined \
         -Itests/audio_stubs -Itests/vibe/vendor/cjson tests/vibe/test_setup_scan.c \
         "${test_dir}/vibe_json.o" -lm -o "${test_dir}/test_vibe_setup_scan"

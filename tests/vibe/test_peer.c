@@ -3,6 +3,14 @@
 #include <stdio.h>
 
 int main(void) {
+    assert(vibe_peer_use_wifi(10000,9999,9999,true,true,false));
+    assert(!vibe_peer_use_wifi(10000,9999,9999,true,true,true));
+    assert(vibe_peer_use_wifi(10000,9999,7000,true,true,true));
+    assert(!vibe_peer_use_wifi(10000,7000,9999,true,true,false));
+    assert(vibe_peer_use_wifi(10000,7001,9999,true,true,false));
+    assert(vibe_peer_use_wifi(10000,9999,9999,true,false,true));
+    assert(!vibe_peer_use_wifi(10000,9999,9999,false,true,false));
+    assert(!vibe_peer_use_wifi(10000,10001,9999,true,true,false));
     const uint32_t computer=0x0101a8c0,other=0x0201a8c0;
     assert(vibe_peer_matches(computer,33333,computer,33333)); /* Legacy client. */
     assert(vibe_peer_matches(computer,52123,computer,52123));
@@ -34,5 +42,12 @@ int main(void) {
     assert(vibe_peer_heartbeat_due(33000,1000,1000,true,30000));
     assert(!vibe_peer_heartbeat_due(91000,1000,1000,true,30000));
     assert(!vibe_peer_heartbeat_due(33000,32999,1000,true,30000));
+    assert(!vibe_peer_claim_allowed(false,false,false,false)); /* Discovery cannot claim. */
+    assert(!vibe_peer_claim_allowed(false,false,true,true)); /* Nor renew an owner. */
+    assert(vibe_peer_claim_allowed(false,true,false,false)); /* Physical pairing. */
+    assert(!vibe_peer_claim_allowed(false,true,true,false)); /* Two computers cannot race. */
+    assert(vibe_peer_claim_allowed(true,false,true,true));
+    assert(!vibe_peer_claim_allowed(true,false,true,false));
+    assert(vibe_peer_claim_allowed(true,false,false,false)); /* Expired lease. */
     puts("LAN peer policy: dynamic/legacy ports, stale endpoint rejection, traffic-aware heartbeat PASS");
 }

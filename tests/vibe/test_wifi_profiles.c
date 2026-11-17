@@ -35,7 +35,11 @@ int main(void) {
     assert(!vibe_wifi_retry_due(&retry,1000,0));
     assert(vibe_wifi_retry_due(&retry,1000,2));vibe_wifi_retry_started(&retry,1000);
     assert(!vibe_wifi_retry_due(&retry,2000,2));
-    assert(!vibe_wifi_retry_timeout(&retry,15999));assert(vibe_wifi_retry_timeout(&retry,16000));
+    assert(!vibe_wifi_retry_timeout(&retry,15999,false));assert(vibe_wifi_retry_timeout(&retry,16000,false));
+    assert(!vibe_wifi_retry_timeout(&retry,16000,true));
+    assert(!vibe_wifi_retry_timeout(&retry,45999,true));
+    assert(vibe_wifi_retry_timeout(&retry,46000,true));
+    assert(!vibe_wifi_retry_timeout(&retry,999,true));
     vibe_wifi_retry_failed(&retry,16000,2);
     assert(retry.attempt==1 && !retry.round_done);
     assert(!vibe_wifi_retry_due(&retry,16499,2));assert(vibe_wifi_retry_due(&retry,16500,2));
@@ -53,17 +57,6 @@ int main(void) {
     assert(vibe_wifi_retry_delay_ms(0)==5000 && vibe_wifi_retry_delay_ms(1)==10000);
     assert(vibe_wifi_retry_delay_ms(2)==20000 && vibe_wifi_retry_delay_ms(3)==40000);
     assert(vibe_wifi_retry_delay_ms(4)==60000 && vibe_wifi_retry_delay_ms(100)==60000);
-    // A completed failed round must not cancel the next site's association or
-    // DHCP merely because twenty seconds have passed since boot.
-    vibe_wifi_retry_reset(&retry,1000);
-    assert(vibe_wifi_offer_setup(&retry,1000,1000,false,false));
-    assert(!vibe_wifi_offer_setup(&retry,30000,1000,true,false));
-    vibe_wifi_retry_started(&retry,1000);vibe_wifi_retry_failed(&retry,2000,1);
-    assert(vibe_wifi_offer_setup(&retry,30000,1000,true,false));
-    vibe_wifi_retry_started(&retry,30000);
-    assert(!vibe_wifi_offer_setup(&retry,30001,1000,true,false));
-    retry.pending=false;
-    assert(!vibe_wifi_offer_setup(&retry,30001,1000,true,true));
     assert(!vibe_wifi_disconnect_relevant(office.ssid,(const uint8_t *)home.ssid,strlen(home.ssid),false));
     assert(!vibe_wifi_disconnect_relevant(office.ssid,(const uint8_t *)office.ssid,strlen(office.ssid),true));
     assert(vibe_wifi_disconnect_relevant(office.ssid,(const uint8_t *)office.ssid,strlen(office.ssid),false));

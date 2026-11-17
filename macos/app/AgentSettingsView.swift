@@ -25,19 +25,18 @@ struct AgentSettingsView:View {
                             Button(row.installed ? "移除集成" : "安装集成") { center.change(row,install:!row.installed) }.disabled(center.busy || !row.detected || preview)
                         }
                     }
-                    let seen=center.recent.first{$0.agent==row.agent}
                     HStack(spacing:6) {
-                        Circle().fill(seen != nil ? Color.green : row.installed ? Color.orange : Color.gray).frame(width:5,height:5)
-                        Text(seen != nil ? "已收到事件" : row.installed ? "已安装 · 等待事件验证" : row.detected ? "已检测到" : "未检测到").font(.system(size:11))
+                        Circle().fill(row.installed ? Color.green : Color.gray).frame(width:5,height:5)
+                        Text(row.installed ? "已安装" : row.detected ? "已检测到" : "未检测到").font(.system(size:11))
                         Spacer()
-                        Text([row.executable != nil ? "终端" : "",row.application != nil ? "桌面版" : ""].filter{!$0.isEmpty}.joined(separator:" · ")).font(.system(size:10)).foregroundStyle(.secondary)
+                        if row.installed {
+                            Button("配置说明") { center.installationNotice=AgentInstallNotice(agent:row.agent) }
+                                .buttonStyle(.borderless).font(.system(size:11))
+                        }
                     }
                     if row.agent == .dsh,row.detected {
                         let directory=PairingStore.directory.appendingPathComponent("agents/vibe-companion-dsh")
                         let prepared=FileManager.default.fileExists(atPath:directory.appendingPathComponent("package.json").path)
-                        Text("1. 点击「准备插件」，再点击「复制插件路径」。\n2. 在 DSH 中打开「插件」→「添加插件」。\n3. 粘贴路径，点击「安装」。")
-                            .font(.system(size:11)).foregroundStyle(.secondary)
-                            .lineSpacing(3).fixedSize(horizontal:false,vertical:true)
                         HStack {
                             Spacer()
                             Button(center.dshPathCopied ? "已复制路径" : "复制插件路径") {
@@ -64,6 +63,18 @@ struct AgentSettingsView:View {
                     HStack { Text(event.agent.title);Text(event.kind.title).foregroundStyle(.secondary);Spacer();Text(Date(timeIntervalSince1970:event.created),style:.time).monospacedDigit() }.font(.system(size:11))
                 }
             }
+        }.sheet(item:$center.installationNotice) { notice in
+            VStack(alignment:.leading,spacing:20) {
+                Text(notice.title).font(.system(size:19,weight:.semibold))
+                Text(notice.instructions).font(.system(size:13)).lineSpacing(6)
+                    .fixedSize(horizontal:false,vertical:true).textSelection(.enabled)
+                HStack {
+                    Spacer()
+                    Button("知道了") { center.installationNotice=nil }
+                        .buttonStyle(.borderedProminent).keyboardShortcut(.defaultAction)
+                }
+            }.padding(28).frame(width:620,alignment:.leading)
+                .background(Palette.surface).foregroundStyle(Palette.text).tint(Palette.accent).preferredColorScheme(.dark)
         }
     }
 }

@@ -17,11 +17,13 @@ Requires **macOS 13+**, on Apple Silicon or Intel. Download the DMG or ZIP from
    xattr -dr com.apple.quarantine
    ```
 
-3. **Connect:** install the matching device firmware, keep Mac and device on a
-   reachable LAN, and allow local network access when prompted. Enter the
-   six-digit code shown on the device to pair.
-4. **Set up voice (optional):** install [BlackHole 2ch](https://existential.audio/blackhole/)
-   and [WeType](https://z.weixin.qq.com/). In the input method, choose BlackHole 2ch
+3. **Connect:** install matching firmware, click the device's **Connect** button,
+   then accept with its upper key. LAN and BLE merge into one row and can remain
+   connected together with automatic fallback. Allow local-network/Bluetooth access.
+   Computer handover also requires device confirmation; see [Device connections](connections.md).
+4. **Set up voice (optional):** install [BlackHole 2ch](https://existential.audio/downloads/BlackHole2ch-0.7.1.pkg)
+   and [WeType](https://z.weixin.qq.com/). Restart the Mac after installing BlackHole.
+   In the input method, choose BlackHole 2ch
    as microphone and set hold-to-talk to **left Control + left Option + V**;
    use the same shortcut in Vibe. Enable the app in **System Settings → Privacy &
    Security → Accessibility**. Skip this step for Agent notifications alone.

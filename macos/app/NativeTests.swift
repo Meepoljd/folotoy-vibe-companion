@@ -4,7 +4,10 @@ enum NativeTests {
     static func run() {
         if CommandLine.arguments.contains("--agent-tests") { AgentTests.run();return }
         func check(_ yes:Bool,_ description:String) { if !yes { fputs("FAIL: \(description)\n",stderr);exit(1) } }
+        WeatherTests.run(check)
+        RadioTests.run(check)
         LANTests.run(check)
+        ConnectionTests.run(check)
         check(VoiceCodec.decode(Data(repeating:0,count:803))==nil,"short ADPCM block")
         var block=Data(repeating:0,count:804);block[2]=89
         check(VoiceCodec.decode(block)==nil,"invalid ADPCM step index")
@@ -22,6 +25,14 @@ enum NativeTests {
         check(Shortcut.hasElevatedConflictRisk("right-shift"),"single modifier conflict warning")
         check(Shortcut.hasElevatedConflictRisk("command+v"),"common editing shortcut warning")
         check(!Shortcut.hasElevatedConflictRisk("ctrl+option+v"),"tested multi-modifier shortcut retained")
+        check(Shortcut.recordedSpec([59,58,9])=="ctrl+option+v","recorded left-side combination")
+        check(Shortcut.recordedSpec([62,61,9])=="right-ctrl+right-option+v","recorded right-side combination")
+        check(Shortcut.recordedSpec([9,59])==nil && Shortcut.recordedSpec([59,59])==nil,"reject malformed recorded combinations")
+        check(Shortcut.recordedSpec([122])==nil && Shortcut.recordedSpec([])==nil,"reject unsupported or empty recording")
+        check(Shortcut.displayKeys("right-ctrl+option+v")==["右 ⌃","左 ⌥","V"],"keycaps preserve modifier side")
+        check(Shortcut.recordingModifiers((1<<18)|(1<<19))==[59,58],"record aggregate modifiers without separate flags events")
+        check(Shortcut.recordingModifiers(0x42000|0x80040)==[62,61],"record right-side event flags")
+        check(Shortcut.recordingModifiers(0x42001)==[59,62],"record both Control keys")
         let search=RadioDirectory.request(name:"音乐",chineseOnly:true)
         let fields=Dictionary(uniqueKeysWithValues:URLComponents(url:search.url!,resolvingAgainstBaseURL:false)!.queryItems!.map { ($0.name,$0.value ?? "") })
         check(fields==["limit":"10","name":"音乐","language":"chinese","hidebroken":"true","order":"votes","reverse":"true"],"exact requested search parameters")
@@ -114,6 +125,9 @@ enum NativeTests {
         check(!PermissionRecoveryPolicy.shouldReload(current:false,fresh:false,returnedFromSettings:false,alreadyReloaded:false),"no spontaneous reload on denied permission")
         check(!PermissionRecoveryPolicy.shouldReload(current:false,fresh:true,returnedFromSettings:true,alreadyReloaded:true),"at most one automatic reload")
         check(!PermissionRecoveryPolicy.shouldReload(current:true,fresh:true,returnedFromSettings:true,alreadyReloaded:false),"granted process does not need reload")
+        check(PermissionRecoveryPolicy.shouldReload(current:true,fresh:false,returnedFromSettings:false,alreadyReloaded:false),"revoked permission replaces a cached grant")
+        check(!PermissionRecoveryPolicy.shouldReload(current:true,fresh:nil,returnedFromSettings:false,alreadyReloaded:false),"failed probe does not revoke a grant")
+        check(!PermissionRecoveryPolicy.shouldReload(current:true,fresh:false,returnedFromSettings:false,alreadyReloaded:true),"cached grant recovery cannot restart repeatedly")
         check(PermissionRelaunch.run(parent:"invalid",resumeID:UUID().uuidString)==2,"reject invalid relaunch parent")
         check(PermissionRelaunch.run(parent:"1",resumeID:"invalid")==2,"reject invalid relaunch credentials")
         let device="abcdef123456",token=PairingStore.random()

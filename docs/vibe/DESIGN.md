@@ -113,7 +113,7 @@ recording waiting to be uploaded later.
 
 Weather has four pages: current conditions; six upcoming full hours; air and
 wind; three-day forecast. Short SETTINGS advances manually; time passing never
-changes the page. Keep that page for reading until the next screen wake.
+changes the page. Retain the reading page across screen sleep and wake.
 Switching pages uses cached data and never causes a
 network request or Flash write.
 
@@ -302,7 +302,15 @@ an unrelated permission check or send test keystrokes to infer permission.
 Phone hotspot setup configures **Wi-Fi only**, using the password-free
 `Vibe-Setup-...` AP and captive portal. Successful connection and storage close
 the AP automatically without another confirmation. Routine settings use the
-normal LAN and never require returning to hotspot mode.
+desktop's existing Wi-Fi or BLE link and never require returning to hotspot mode.
+
+A new device introduces Bluetooth, Wi-Fi and Later on its physical key rail.
+BLE is discoverable from boot, before any transport choice or Wi-Fi setup;
+computer requests may show the physical confirmation directly over the guide.
+Later persists independently in NVS. Paired or previously dismissed devices
+start Home. Device settings retain computer connection, Wi-Fi and unpairing.
+Saving Wi-Fi does not finish computer authorization. Cancellation or expiry
+restores the original page and retains existing configuration.
 
 Keep up to five Wi-Fi profiles, managed only in the phone portal. The portal
 separates saved and nearby networks, reuses saved passwords without returning
@@ -315,9 +323,10 @@ On every boot/outage, try the last successful profile and then every other
 saved profile, including hidden/unavailable-in-scan SSIDs. Driver failure moves
 to the next profile; a fifteen-second attempt timeout bounds missing callbacks.
 Failed rounds back off 5/10/20/40/60 seconds. Healthy links trigger no background
-scans or profile hopping. A startup setup hotspot is offered only after all
-saved profiles have failed a round and twenty seconds have elapsed; a later
-outage keeps Home and its timer. Once the setup hotspot is open, stop an
+scans or profile hopping. Without saved Wi-Fi, first boot leaves the Wi-Fi radio
+stopped and uses BLE discovery. Only an explicit Wi-Fi choice opens the hotspot;
+an unavailable saved network or later outage preserves the page and timer.
+Once the setup hotspot is open, stop an
 unfinished automatic connection attempt and pause background profile retries.
 The phone must be able to scan without the driver simultaneously connecting
 to an unavailable saved network. Test only the network explicitly submitted
@@ -325,8 +334,10 @@ in the portal; resume automatic retry when setup is closed. An already healthy
 STA link may remain connected while the phone manages profiles.
 Late failures for a previous SSID, or while the driver already has a newer
 association, must not clear readiness or advance that connection's retry.
-Select the next profile after applying timeouts, not before. Automatic setup
-must never interrupt an attempt or association still waiting for DHCP.
+Select the next profile after applying timeouts, not before. Existing BLE
+heartbeats must not close manual Wi-Fi setup or abort a submitted connection.
+Automatic closure for first-use computer authorization is allowed only while
+no submitted network is being tested.
 
 Scan errors, driver-busy state and allocation failure must be returned as
 errors, not successful empty arrays. Keep the saved list usable if scanning
@@ -343,7 +354,7 @@ read the new multi-profile format after downgrade; provisioning is then needed.
 No new resident worker or task stack is allocated. Protect the bank separately
 from controller state; network/HTTP workers own persistence, never button callbacks.
 
-Only the device discovery port is fixed (UDP 33333). The client binds port zero
+Device discovery, control and radio audio use fixed UDP 33333. The client binds port zero
 and lets the OS assign an exclusive available port. Discovery, settings and audio
 reuse that socket. An authenticated beacon selects its actual source IP and UDP
 port; the advertised JSON port cannot redirect replies. Ordinary packets must
@@ -372,14 +383,14 @@ always available as the default module. Existing saved values take precedence
 on updates. Local settings contain basic hardware controls, theme, Wi-Fi setup
 and unpairing; there is no software power-off action.
 
-The six-digit code bootstraps pairing with a random token. The token is stored
+The desktop requests a connection and the device confirms it with a physical key. A SHA-256 commitment binds approval to the client and candidate token; see [Device connections](connections.md). The token is stored
 in device NVS and an account-local client file (directory 0700, file 0600), with no
 Keychain calls. LAN transport is not encrypted; this is a trusted-LAN design.
 Audio is routed live, not saved by this project. macOS Accessibility is a separate
 OS permission for synthetic keyboard events. Shortcuts are ordinary key events
 and can conflict with other software or be blocked by secure input.
 
-Currently one device / one computer is supported. Multi-computer switching and remote playback control are outside this version's contract. Agent notifications follow the integration contract below.
+The desktop selects one device from a deduplicated list. Each device authorizes one computer at a time, with physical approval for handover. Wi-Fi and BLE can attach together with one business transport and automatic fallback. Remote playback control remains outside this version's contract. Agent notifications follow the integration contract below.
 
 ## 9. Resource ownership and power
 
@@ -388,13 +399,23 @@ only enqueue events. Preserve voice service state and its **3,200-byte PCM buffe
 from startup**, including while radio plays. Keeping RAM reserved does not keep
 the microphone powered. Keep the codec asleep when audio is idle.
 
-Weather updates use a disposable worker. HTTP/TLS, response bodies and parsing
+Weather normally arrives as a compact computer cache over either paired link.
+The client validates provider units, bounds the response, sends one authenticated
+packet, cancels during audio, and refreshes at fifteen-minute intervals with
+bounded retry. The controller rejects wrong-city, stale, malformed and busy
+updates; failed updates retain the previous sample. It adds no device worker,
+TLS allocation or persistent cache. Direct device weather downloads remain an
+optional fallback with their existing memory admission and disposable worker.
+
+That fallback uses a disposable worker. HTTP/TLS, response bodies and parsing
 resources are released, then another task deletes the finished worker and
 reclaims its **8 KiB stack**. Audio cancels and joins that worker before using its
 resources. Sleeping or suspending a task alone does not reclaim its stack.
 
-Radio owns disposable source/HTTP, decoder, FIFO and output resources. Join its
-reader before releasing memory. Voice ends the radio session before capture;
+The Mac owns radio HTTP(S), HLS/ICY parsing and native audio decoding. The
+device owns only a sixteen-frame ADPCM receiver and one PCM output block, allocated
+for each listening session. No device radio HTTP/TLS or MP3/AAC decoder runs.
+Voice ends the radio session before capture;
 after voice, rebuild radio only if listening was previously requested. A paused
 radio stays paused. Do not retain large radio resources merely to avoid a
 reconnection unless the measured RAM and energy budget supports it.
@@ -407,7 +428,7 @@ Every allocation needs one owner, a lifetime and a failure policy:
 | Core task stacks, 33 KiB total | Main, audio, network, LVGL / application lifetime | Measure worst paths before resizing; do not add a permanent task per page |
 | LVGL pool 26 KiB + display DMA 9,600 B | UI / application lifetime | Rebuild module objects inside the pool; keep DMA requirements distinct from ordinary heap |
 | Weather stack 8 KiB and HTTP/TLS/body/parse workspace | Disposable weather worker / one update | Cancel, clean up, externally join/delete before audio; allocation failure defers weather |
-| Radio workspace, decoder and HTTP | Audio owner / one radio session | Join reader, then release on voice/pause/exit/failure; stop repeated memory-failure retries |
+| Radio encoded blocks 12,864 B + 96 B metadata + PCM 3,200 B | Audio owner / one radio session | Sixteen separate 804 B blocks tolerate post-voice heap fragmentation. Detach under receiver mutex, then free all blocks on voice/exit/failure; no extra reader task |
 | Wi-Fi credential bank, 487 B | Network service / application lifetime | Five profiles; separate mutex; serialize at most 491 payload bytes on existing worker stacks, save before replacing; never return passwords through LAN/portal reads |
 | Saved station list | Catalog / application lifetime | Allocate `12 + 306 × count` bytes (maximum 6,132), not a permanent 20-slot array; store only actual null-terminated names/URLs in NVS; accept legacy 16-slot blobs |
 | Station-list transfer staging | Configuration transaction / bounded transfer | Allocate by incoming count only while audio is idle; cancel before audio starts; promote the staged list on atomic commit without another full-size copy; preserve the old list on failure; expire abandoned transfers |
@@ -422,59 +443,114 @@ entry/exit and voice interruption. A successful single allocation does not
 establish an adequate memory budget. Resource-policy changes require lifecycle,
 allocation-failure and repeated-cleanup tests plus a device regression check.
 
-MP3 uses a 4,608-byte output block, 1 KiB input and a
-5 KiB reader stack, plus decoder and network allocations. AAC/TS starts with an
-8 KiB output block; after the first frame, compact it to 4,608 bytes if that frame
-fits. Failed compaction retains the original block and PCM. For every format,
-choose three, two or one independent 8 KiB blocks using measured post-codec/
-post-I2S free heap: prefer 24 KiB, fall back to 16 or 8 KiB and retain a 16 KiB
-control/network margin. Allocate the required reader stack first. Failure of
-the second/third block keeps the smaller working FIFO; check actual remaining
-heap afterward, releasing trailing blocks if needed. Reject startup if even
-the minimum would consume the margin. This is an admission budget, not a promise that a
-future allocation or arbitrary broadcaster will succeed. No all-free-heap buffer allocation: reserve room
-for Wi-Fi/lwIP, control messages, audio hardware and allocator fragmentation.
-Fonts in Flash are not reclaimable heap; free LVGL objects stay within LVGL's
-separate pool. Do not reduce stacks or pools without worst-path measurements.
+The desktop advertises `radioFormats: 3` (bit 0: legacy 24 kHz format 1; bit 1: buffered 16 kHz format 2). The device requires bit 1 before starting radio and includes `format: 2` in `radio.open`; older desktop clients show the existing update-client message. Missing `format` means legacy format 1 on the new desktop, retaining support for older devices. Format 2 lowers high-frequency detail above 8 kHz to reduce media bandwidth by about one third and fit a longer jitter cache in 752 B less receiver/PCM memory (16,160 B total on ESP32-C3, excluding ingress, I2S and allocator overhead). It does not affect voice capture.
 
-Keep optional non-ISR FreeRTOS/ring-buffer functions in Flash and disable the
-Wi-Fi IRAM throughput optimizations to recover shared internal SRAM. Preserve
-IRAM-required interrupt paths, stack guards, display/audio buffers and the Wi-Fi
-sleep policy. Recheck voice latency, sustained reception and battery use after
-changing code placement; a smaller IRAM image does not prove equal performance.
-Enable dynamic TLS buffers and release handshake configuration and peer
-certificates when no longer needed. Short weather requests use dynamic RX;
-radio selects the SDK's post-handshake static RX strategy. It reserves the full
-receive-record block before codec/FIFO allocation, retaining it for that HTTP
-connection to prevent repeated large-block allocation during playback. TX stays
-dynamic, and closing the connection releases RX. Certificate validation stays
-enabled; do not shrink accepted TLS records merely to fit one broadcaster.
+Radio audio is 16 kHz mono, in independently decodable 100 ms IMA ADPCM
+blocks (804 bytes). Packet type 5 contains a random 64-bit session ID,
+a 32-bit sequence and format ID 2. The receiver validates the authenticated
+endpoint, current ownership generation, session, length and codec header before
+accepting a sixteen-frame sequence window. Duplicates never replay. Playback
+credits and lifecycle events go over both attached links; media uses one route.
+Radio uses UDP with a 1.6-second receive cache and bounded missing-block repair;
+no additional TCP listener, socket or framing layer is needed. The receiver
+validates the authenticated endpoint, generation and session. Delayed mirrored
+receipt masks at the same playback cursor can add bits but cannot erase them.
+The same receipts prune already-played or received packets from the BLE write
+queue, including Wi-Fi-delivered repairs; preserve an in-flight response write
+and every control fragment. A stale media backlog must not delay new audio.
+A missing Wi-Fi media acknowledgement triggers repair after 350 ms at startup
+and 100 ms while playing. BLE takeover requires a startup hole or one of the
+next eight blocks (five in the legacy ten-frame cache) to remain missing for 350 ms; a late tail receipt cannot
+divert healthy Wi-Fi into a newly established BLE queue. Once BLE carries a
+session, keep it while media receipts remain healthy; Wi-Fi discovery recovery
+and sparse probe receipts do not prove sustained media delivery. Physical BLE loss permits immediate Wi-Fi fallback. A missing near-playhead
+BLE block is tried over Wi-Fi after 300 ms even if control still works; a
+Wi-Fi hole can similarly fall back to BLE after 350 ms. This covers one-way
+media failure without repeated discovery-driven migrations. When the playback
+cursor stalls, alternate-link repair covers the whole missing cache prefix:
+rebuffering needs twelve contiguous blocks, not only the first eight. A new listening
+session chooses again.
+After a media-driven route change, allow one second for queued fragments.
+Advancing in-session media receipts on that chosen route renew a 600 ms hold;
+unchanged, regressing or sentinel receipts cannot renew it. A slow individual
+packet cannot immediately send a recovering stream back to the route that just
+failed. Physical disconnection still selects the available route immediately.
+Media packets are paced rather than sent as a full-window Wi-Fi burst. With
+BLE available, RSSI at or below -75 dBm selects BLE at startup; recovery above
+-68 dBm clears the poor-signal flag. Later routing follows actual media receipts.
+Full session loss cancels playback; restored authorization
+starts a fresh session only if listening is still requested.
 
-Register only the MP3/AAC codecs and TS container that the source path accepts.
-Always unregister partially installed registries after a failed registration.
-Direct streams reserve the real frame decoder before playback buffers. All
-streams allocate input/output first, decode their first PCM frame to establish
-the actual codec, initialize I2S, then budget and allocate FIFO blocks and the reader stack. Preserve that
-PCM and any unconsumed input, and carry ICY filter state into the reader. Bound
-priming input to 64 KiB and check a fifteen-second deadline between reads;
-transport calls still have their own bounded cancellation/connection behavior.
-Do not reserve both an MP3 and AAC decoder for an unknown container. Report
-phase-specific free/largest heap values without adding a resident history ring.
-When a decoder outputs buffered PCM with zero newly consumed input bytes,
-resubmit the same unconsumed input. Only a call with neither consumed input nor
-PCM allows at most eight consecutive parser-state transitions before a
-no-progress failure. Never discard the rest of a TS/PES packet merely
-because that call drained an internally buffered audio frame.
+The four static Wi-Fi RX buffers cover an explicitly configured four-frame
+AMPDU RX block-ack window; the SDK default six-frame window exceeds this
+reduced pool. Dynamic RX and TX are each capped at four buffers: the earlier
+12/12 limits produced failed 1,700-byte Wi-Fi allocations during radio testing.
+These limits bound transient consumption, rather than reserving extra SRAM;
+radio/voice/control throughput and DHCP/portal behavior need device regression.
+Each connection attempt scans all APs for the selected SSID and sorts by signal,
+instead of stopping at the first, potentially much weaker AP. No BSSID is pinned
+and a healthy connection is not scanned continuously.
 
-Preserve full HLS playlist URLs, including session/signature queries, on every
-refresh and redirect. Resolve `Location` against the last full URL before giving
-IDF an absolute destination; IDF 5.5.3's URL getter omits queries. Reuse playlist
-line scratch for segment destinations and the existing task stacks for redirect
-scratch. Never log signed URLs. Accept bounded master variants up to 384 kbit/s
-without `CODECS` when no video is advertised, then verify real media bytes and
-the first audio frame. Keep explicit video/unsupported-codec rejection and the
-normal codec/memory admission checks. Master bandwidth includes transport
-overhead; it is not the decoded PCM rate or a required FIFO allocation size.
+BLE parameter negotiation starts after a one-second settle period on the NimBLE
+host queue. It must not race the stack's initial DLE/encryption with an additional
+application PHY procedure. A command return of zero is not a successful link
+update: check the completion event and actual supervision timeout. Request a 15–30 ms connection interval and six
+seconds of supervision, accept at least two seconds, and retry at bounded 1/2/4-second backoffs
+with at most four requests per connection. Missing completion is bounded too.
+A central may select 30 ms; retain the valid interval range rather than forcing
+15 ms (see [Apple connection parameters](https://developer.apple.com/library/archive/qa/qa1931/)).
+Each link owns independent state, disconnect/reset clears it, and no periodic
+callout remains after success or exhaustion. The earlier immediate requests
+collided and left this Mac's actual timeout at 360 ms.
+
+During a radio session, the ESP32-C3 coexistence hint prefers Bluetooth so BLE
+connection events and media credits survive Wi-Fi scanning/association. UDP
+radio needs little Wi-Fi airtime. Every completed, cancelled or failed session
+restores balanced coexistence before voice or idle; an unsupported SDK hint is
+logged without turning it into a fatal playback error. No task or buffer is
+added for this scheduling hint.
+
+The Mac uses AudioFileStream and AVAudioConverter, not an external runtime.
+AAC container hints require two ADTS headers at declared frame boundaries;
+a coincidental sync inside MP3 payload cannot select the AAC parser. The known
+legacy RFI preset path is repaired when fetching, without rewriting device lists.
+A radio session holds a scoped Foundation activity for live-audio timer/I/O
+precision: decode-only playback has no local speaker output to advertise its
+latency needs to App Nap. Stop, voice and disconnect end the activity. It does
+not prevent system idle sleep or keep a display awake.
+ADTS packet descriptions can exclude header gaps: copy checked compressed
+payloads into contiguous converter storage and rebase their offsets. Preserve
+converter state across chunks. When an active receiver briefly lacks its next block,
+it allows up to 40 ms of ingress jitter before returning to prefill, below the
+60 ms I2S DMA reserve. Cancellation and ownership checks continue during this
+bounded wait. Radio starts after twelve frames are ready; its sixteen-frame receive window is
+negotiated in the open event. The producer queue holds at most 30 frames;
+stopping wakes a blocked producer and cancels its worker. The worker alone invalidates URLSession after leaving all requests; stop-before-start and HLS request transitions must not race task creation on an invalidated session. If a close event is lost,
+twelve seconds without current-session progress cancels the desktop decoder,
+cache, timer and scoped activity; stale closes cannot stop a newer session. BLE radio queue limits
+reserve space for control; cancelling radio discards queued media while retaining
+the current GATT write and all control fragments. Radio uses paced Write
+Commands, with OS flow control, packet deduplication and an independent
+fragment channel. Its temporary assembly is freed after completion, disconnect
+or expiry. GATT Service Changed refreshes cached properties across firmware
+updates while retaining the encrypted bond; the client rediscovers invalidated
+services. Keep warning/error logs, but suppress per-notification stack INFO spam.
+
+HLS retains full playlist/segment URLs and queries, tracks media sequence numbers,
+and never replays an already consumed segment. Select audio-only master variants
+up to 384 kbit/s, then validate actual media through the decoder. MPEG-TS parsing
+keeps PID/continuity across segments. Encrypted HLS, fMP4 maps and byte ranges
+fail explicitly. Bound playlist size to 32 KiB, segments to 2 MiB, nesting to
+five levels and source requests to a 12-second idle timeout. Startup has a
+20-second deadline; a running device stream stops after eight seconds without
+playable audio. Source errors stop with a retryable device control, rather than
+remaining in Connecting forever. Never log signed URLs.
+
+Keep optional non-ISR FreeRTOS/ring-buffer functions in Flash and disable Wi-Fi
+IRAM throughput optimizations without moving required interrupt paths. Weather
+retains validated HTTP(S) and disposable TLS resources. Radio TLS runs on the
+Mac and does not allocate device TLS buffers. Do not change fonts, UI pools,
+communication buffers or stack budgets to conceal an optional radio allocation.
 
 New paired clients negotiate a 10-second combined readiness/time beacon and
 30-second peer expiry. The installed firmware accepts 5–30 seconds; its hello
@@ -571,15 +647,16 @@ Measure battery-side current separately; a USB charger meter includes charging
 and conversion effects. No battery-life claim follows from a successful build.
 
 Use notification/queue waits and cached data. Do not search/probe station
-libraries on the ESP32. Keep radio modem sleep enabled unless measurements
-justify a bounded alternative. Voice may temporarily use low-latency Wi-Fi.
+libraries on the ESP32. Radio and voice temporarily disable Wi-Fi modem sleep
+for their audio sessions, then restore MIN_MODEM.
 Stop retrying after bounded repeated failures. Stable radio reception takes
 priority over an assumed power saving; increased Wi-Fi power alone does not fix
 an upstream outage. A finite FIFO cannot conceal arbitrary network gaps.
 
-Current cancellation is cooperative. Body reads check at short timeouts; DNS,
-connection establishment, TLS and weather requests can take longer. Radio
-resume includes a fresh connection and prefill. Do not claim instant voice or
+Weather cancellation is cooperative; DNS, connection establishment and TLS
+can outlast a body-read timeout. Radio reception checks cancellation between
+100 ms output blocks; Mac requests are cancelled separately. Resume includes
+a fresh computer decoding session and prefill. Do not claim instant voice or
 instant radio recovery without device timing. Current/energy improvements need
 instrument measurements, not inference from lower task counts.
 

@@ -1,5 +1,6 @@
 #include "vibe.h"
 #include "radio/catalog_service.h"
+#include "radio/remote.h"
 #include "adpcm.h"
 #include "ui_sfx.h"
 #include "bsp_audio.h"
@@ -31,7 +32,7 @@ bool vibe_audio_request(unsigned action) {
 }
 static bool radio_cancel(void) {
     vibe_model_t m; vibe_status_t s; vibe_snapshot(&m,NULL,&s);
-    return pending() || !m.radio_active || !m.radio_requested || !s.wifi || s.provisioning;
+    return pending() || !m.radio_active || !m.radio_requested || !s.peer || !s.radio_pcm || s.provisioning;
 }
 static void set_busy(bool yes) {
     xSemaphoreTake(v_mutex,portMAX_DELAY); v_status.audio_busy=yes; xSemaphoreGive(v_mutex);
@@ -118,7 +119,7 @@ static void process_audio(unsigned actions) {
         uint64_t started=vibe_now();
         const vibe_radio_result_t result=vibe_radio_session(url,radio_cancel);
         if (radio_cancel()) break;
-        if (result==V_RADIO_SESSION_NO_MEMORY) {
+        if (result==V_RADIO_SESSION_NO_MEMORY || result==V_RADIO_SESSION_REMOTE_ERROR) {
             xSemaphoreTake(v_mutex,portMAX_DELAY);v_model.radio_requested=false;xSemaphoreGive(v_mutex);
             break; /* Keep the precise error; retrying cannot repair a RAM shortage. */
         }
@@ -160,6 +161,7 @@ static void audio_task(void *arg) {
 }
 esp_err_t vibe_audio_init(void) {
     if (worker) return ESP_OK;
+    if (!vibe_radio_remote_init()) return ESP_ERR_NO_MEM;
     /* Voice is core functionality: reserve its small PCM block at startup,
      * including while radio owns its much larger, disposable workspace. */
     capture_pcm=malloc(ADPCM_BLOCK_SAMPLES*2);

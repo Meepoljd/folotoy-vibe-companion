@@ -1,9 +1,12 @@
 #include "vibe.h"
 #include "radio/catalog_service.h"
+#include "radio/remote.h"
+#include "radio/stream.h"
 #include "bsp_audio.h"
 #include "bsp_battery.h"
 #include "power.h"
 #include "peer.h"
+#include "ble.h"
 #include "driver/usb_serial_jtag.h"
 #include "bsp_button.h"
 #include "bsp_display.h"
@@ -15,13 +18,14 @@
 #include "freertos/task.h"
 #include "esp_mac.h"
 #include "esp_pm.h"
-#include "esp_random.h"
 #include "esp_sleep.h"
 #include "esp_system.h"
 #include "esp_timer.h"
 #include "nvs.h"
 #include "nvs_flash.h"
 #include "key_guard.h"
+#include "input_gate.h"
+#include <stdatomic.h>
 #include <math.h>
 #include <stdio.h>
 #include <string.h>
@@ -35,6 +39,9 @@ SemaphoreHandle_t v_mutex;
 QueueHandle_t v_queue;
 static volatile bool input_overflow;
 static bool held[3], long_press[3];
+static atomic_bool screen_visible;
+static vibe_prompt_input_t prompt_input;
+static bool intro_skipped;
 static key_guard_t wake_guard;
 static const char *TAG="vibe";
 // Catch a future config change that would silently block automatic light sleep.
@@ -62,6 +69,8 @@ static void load_prefs(void) {
                 vibe_prefs_decode(&legacy,z,true,&v_prefs,&v_status.appearance);
         }
         z=sizeof(v_status.token);nvs_get_str(n,"token",v_status.token,&z);
+        uint8_t skipped=0;
+        if (nvs_get_u8(n,"intro_skipped",&skipped)==ESP_OK) intro_skipped=skipped==1;
         nvs_close(n);
     }
     v_status.token[sizeof(v_status.token)-1]=0;
@@ -155,6 +164,21 @@ static bool token_valid(const char *s) {
     for (int i=0;i<64;i++) if (!strchr("0123456789abcdef",s[i])) return false;
     return true;
 }
+static bool forget_computer(void) {
+    nvs_handle_t n;
+    if (nvs_open("vibe",NVS_READWRITE,&n)!=ESP_OK) return false;
+    esp_err_t erased=nvs_erase_key(n,"token");
+    bool saved=(erased==ESP_OK || erased==ESP_ERR_NVS_NOT_FOUND) &&
+        nvs_set_u8(n,"intro_skipped",0)==ESP_OK && nvs_commit(n)==ESP_OK;
+    nvs_close(n);
+    if (saved) {
+        v_status.connection_request=(vibe_connection_request_t){0};
+        v_status.token[0]=0;v_status.audio_ready=false;v_status.hotkey_ready=false;
+        v_status.peer_seen_ms=0;v_status.peer=false;
+        intro_skipped=false;vibe_model_connection_boot(&v_model,false,false);
+    }
+    return saved;
+}
 /* Runs only on the controller task. Authentication precedes every mutation. */
 static void receive_json(const char *s) {
     cJSON *o=cJSON_Parse(s); if (!o) return;
@@ -165,28 +189,36 @@ static void receive_json(const char *s) {
     const cJSON *auth=cJSON_GetObjectItemCaseSensitive(o,"token");
     const char *token=cJSON_IsString(auth) ? auth->valuestring : "";
     if (!strcmp(t->valuestring,"pair")) {
-        static uint64_t attempted;
-        if (vibe_now()-attempted<1000) { cJSON_Delete(o); return; }
-        attempted=vibe_now();
-        const cJSON *code=cJSON_GetObjectItemCaseSensitive(o,"code");
-        if ((!v_status.token[0] && cJSON_IsString(code) && !strcmp(code->valuestring,v_status.pair_code) && token_valid(token)) ||
-            (v_status.token[0] && !strcmp(token,v_status.token))) {
+        const cJSON *clientj=cJSON_GetObjectItemCaseSensitive(o,"client"),*requestj=cJSON_GetObjectItemCaseSensitive(o,"request");
+        const char *client=cJSON_IsString(clientj)?clientj->valuestring:NULL;
+        const char *request=cJSON_IsString(requestj)?requestj->valuestring:NULL;
+        bool same=token_valid(token) && v_status.token[0] && !strcmp(token,v_status.token);
+        if (vibe_connection_approved(token,client,request) || same) {
             nvs_handle_t n;
-            bool saved=nvs_open("vibe",NVS_READWRITE,&n)==ESP_OK;
+            bool saved=same || nvs_open("vibe",NVS_READWRITE,&n)==ESP_OK;
+            if (saved && !same) { saved=nvs_set_str(n,"token",token)==ESP_OK && nvs_commit(n)==ESP_OK;nvs_close(n); }
             if (saved) {
-                saved=nvs_set_str(n,"token",token)==ESP_OK && nvs_commit(n)==ESP_OK;
-                nvs_close(n);
-            }
-            if (saved) { strcpy(v_status.token,token); prefs_reply(id,NULL); }
-            else prefs_reply(id,"设备保存失败，请重试");
-        } else prefs_reply(id,"配对码不正确或设备已配对");
+                if (!same) { strcpy(v_status.token,token);vibe_network_commit(client);v_model.connection_from_menu=false; }
+                v_status.connection_request.phase=V_CONNECT_NONE;prefs_reply(id,NULL);
+            } else prefs_reply(id,"设备保存失败，请重试");
+        }
     } else if (!v_status.token[0] || strcmp(token,v_status.token)) {
         /* Do not expose configuration to unauthenticated LAN traffic. */
+    } else if (!strcmp(t->valuestring,"pc.unpair")) {
+        bool saved=forget_computer();prefs_reply(id,saved?NULL:"设备保存失败，请重试");
+        if (saved) vibe_network_release();
+    } else if (!strcmp(t->valuestring,"pc.disconnect")) {
+        v_status.peer_seen_ms=0;v_status.peer=false;
+        v_status.audio_ready=false;v_status.hotkey_ready=false;vibe_network_release();
     } else if (!strcmp(t->valuestring,"pc.status")) {
         unsigned seconds=5;
         if (integer(o,"idleHeartbeat",&seconds,5,30)) v_status.heartbeat_ms=vibe_peer_interval(seconds);
         v_status.audio_ready=cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(o,"audioReady"));
         v_status.hotkey_ready=cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(o,"hotkeyReady"));
+        bool had_radio_pcm=v_status.radio_pcm;
+        unsigned radio_formats=0;
+        v_status.radio_pcm=integer(o,"radioFormats",&radio_formats,0,255) && (radio_formats&(1u<<(V_RADIO_FORMAT-1)));
+        if (!had_radio_pcm && v_status.radio_pcm && v_model.radio_active && v_model.radio_requested && !v_model.recording) vibe_audio_request(V_RADIO_CHANGED);
         const cJSON *ep=cJSON_GetObjectItemCaseSensitive(o,"epoch");
         if (cJSON_IsNumber(ep) && ep->valuedouble>=1700000000 && ep->valuedouble<=4102444800) {
             struct timeval tv={.tv_sec=(time_t)ep->valuedouble}; settimeofday(&tv,NULL);
@@ -200,6 +232,19 @@ static void receive_json(const char *s) {
                 if (!vibe_save_prefs()) v_status.appearance.tz_minutes=previous;
             }
         }
+    } else if (!strcmp(t->valuestring,"weather.cache")) {
+        const cJSON *latitude=cJSON_GetObjectItemCaseSensitive(o,"latitude"),*longitude=cJSON_GetObjectItemCaseSensitive(o,"longitude"),*city=cJSON_GetObjectItemCaseSensitive(o,"city");
+        bool location=cJSON_IsNumber(latitude) && cJSON_IsNumber(longitude) && cJSON_IsString(city) &&
+            latitude->valuedouble==v_prefs.latitude && longitude->valuedouble==v_prefs.longitude && !strcmp(city->valuestring,v_prefs.city);
+        bool idle=v_prefs.weather_enabled && !v_model.recording && !v_model.radio_requested && !v_status.audio_busy && !v_status.provisioning;
+        vibe_weather_t weather;vibe_air_t air;bool ok=location && idle && vibe_weather_cache_parse(cJSON_GetObjectItemCaseSensitive(o,"sample"),&weather,&air);
+        time_t clock=time(NULL);
+        if(ok && clock>=1700000000 && (weather.sampled_at<(int64_t)clock-3600 || weather.sampled_at>(int64_t)clock+300)) ok=false;
+        if(ok) {
+            v_status.forecast=weather;v_status.weather_at_ms=vibe_now();v_status.weather_attempt_ms=vibe_now();
+            if(air.valid){v_status.air=air;v_status.air_at_ms=vibe_now();v_status.air_attempt_ms=vibe_now();}
+        }
+        cJSON *r=cJSON_CreateObject();cJSON_AddStringToObject(r,"event","weather.reply");cJSON_AddStringToObject(r,"id",id);cJSON_AddBoolToObject(r,"ok",ok);send_object(r);
     } else if (!strcmp(t->valuestring,"power.get") || !strcmp(t->valuestring,"power.reset")) {
         send_object(vibe_power_reply(id,!strcmp(t->valuestring,"power.reset")));
     } else if (!strcmp(t->valuestring,"agent.notify")) {
@@ -217,6 +262,9 @@ static void receive_json(const char *s) {
         bool accepted=valid && vibe_agent_push(&v_status.agent_alert,vibe_agent_hash(id),a,k,vibe_now(),ttl);
         cJSON *reply=cJSON_CreateObject();cJSON_AddStringToObject(reply,"event","agent.reply");cJSON_AddStringToObject(reply,"id",id);
         cJSON_AddBoolToObject(reply,"ok",accepted);send_object(reply);
+    } else if (!strcmp(t->valuestring,"playback.status")) {
+        const cJSON *session=cJSON_GetObjectItemCaseSensitive(o,"session");
+        if (cJSON_IsString(session)) vibe_radio_remote_status(session->valuestring,cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(o,"failed")));
     } else if (!strncmp(t->valuestring,"radio.",6)) {
         if ((v_model.recording || v_status.audio_busy || v_model.radio_requested) && strcmp(t->valuestring,"radio.get") && strcmp(t->valuestring,"radio.abort")) {
             cJSON *r=cJSON_CreateObject();cJSON_AddStringToObject(r,"event","radio.reply");cJSON_AddStringToObject(r,"id",id);
@@ -249,7 +297,9 @@ static void key_callback(bsp_btn_t key,bsp_btn_ev_t event,void *user) {
     (void)user;
     if (key_guard_consume(&wake_guard,event==BSP_BTN_RELEASE,esp_timer_get_time())) return;
     if (event!=BSP_BTN_PRESS && event!=BSP_BTN_RELEASE && event!=BSP_BTN_LONG) return;
-    vibe_msg_t msg={.type=V_MSG_KEY,.key=key,.event=event};
+    vibe_msg_t msg={.type=V_MSG_KEY,.key=key,.event=(int)event|
+        (atomic_load_explicit(&screen_visible,memory_order_acquire)?V_KEY_SCREEN_VISIBLE:0),
+        .ui_frame=vibe_ui_connection_frame(NULL)};
     if (xQueueSend(v_queue,&msg,0)!=pdTRUE) input_overflow=true;
 }
 static void execute(unsigned actions) {
@@ -275,21 +325,22 @@ static void execute(unsigned actions) {
             v_status.appearance.mode=theme;model_from_prefs();
         }
     }
-    if (actions&V_START_PROVISION) { v_model.radio_requested=false;vibe_audio_request(V_RADIO_CHANGED);v_model.page=V_PROVISION; vibe_provision_start(); }
+    if ((actions&V_START_PROVISION) && vibe_provision_start()) {
+        v_model.radio_requested=false;vibe_audio_request(V_RADIO_CHANGED);vibe_model_provision_open(&v_model,vibe_now());
+    }
+    if (actions&V_FINISH_PROVISION) vibe_provision_finish();
+    if (actions&V_DISMISS_INTRO) {
+        nvs_handle_t n;bool saved=nvs_open("vibe",NVS_READWRITE,&n)==ESP_OK;
+        if (saved) { saved=nvs_set_u8(n,"intro_skipped",1)==ESP_OK && nvs_commit(n)==ESP_OK;nvs_close(n); }
+        if (!saved) ESP_LOGW(TAG,"Cannot save onboarding dismissal");
+        intro_skipped=saved;vibe_model_intro_saved(&v_model,saved,vibe_now());
+    }
     if (actions&V_UNPAIR) {
-        nvs_handle_t n;
-        if (nvs_open("vibe",NVS_READWRITE,&n)==ESP_OK) {
-            if (nvs_erase_key(n,"token")==ESP_OK && nvs_commit(n)==ESP_OK) {
-                v_status.token[0]=0; v_status.audio_ready=false; v_status.hotkey_ready=false;
-                snprintf(v_status.pair_code,sizeof(v_status.pair_code),"%06lu",(unsigned long)(esp_random()%1000000));
-                v_model.page=V_HOME;
-            }
-            nvs_close(n);
-        }
+        if (forget_computer()) vibe_network_release();
     }
 }
 static void report_memory(void) {
-    static const char *const names[]={"main","vibe_audio","vibe_net","vibe_weather","taskLVGL"};
+    static const char *const names[]={"main","vibe_audio","vibe_net","vibe_weather","taskLVGL","nimble_host"};
     ESP_LOGI(TAG,"Memory free=%u largest=%u minimum=%u",(unsigned)esp_get_free_heap_size(),
         (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT),(unsigned)esp_get_minimum_free_heap_size());
     for (unsigned i=0;i<sizeof(names)/sizeof(names[0]);i++) {
@@ -306,9 +357,9 @@ void app_main(void) {
     esp_err_t n=nvs_flash_init();
     if (n!=ESP_OK) { ESP_LOGE(TAG,"NVS unavailable (%s); retained data was not erased",esp_err_to_name(n)); return; }
     load_prefs(); vibe_model_init(&v_model,vibe_now()); model_from_prefs();
+    vibe_model_connection_boot(&v_model,v_status.token[0]!=0,intro_skipped);
     vibe_radio_catalog_init();
     v_status.tz_minutes=v_status.appearance.tz_minutes; v_status.battery=-1;v_status.heartbeat_ms=5000;
-    snprintf(v_status.pair_code,sizeof(v_status.pair_code),"%06lu",(unsigned long)(esp_random()%1000000));
     uint8_t mac[6]; esp_read_mac(mac,ESP_MAC_WIFI_STA);
     snprintf(v_status.device_id,sizeof(v_status.device_id),"%02x%02x%02x%02x%02x%02x",mac[0],mac[1],mac[2],mac[3],mac[4],mac[5]);
     ESP_ERROR_CHECK(bsp_i2c_init()); ESP_ERROR_CHECK(bsp_display_init());
@@ -316,6 +367,7 @@ void app_main(void) {
     if (bsp_battery_init()==ESP_OK) v_status.battery=bsp_battery_soc();
     ESP_ERROR_CHECK(vibe_audio_init());
     ESP_ERROR_CHECK(vibe_network_init());
+    ESP_LOGI(TAG,"BLE: %s",esp_err_to_name(vibe_ble_init()));
     vibe_ui_init();
     if (esp_sleep_get_wakeup_cause()==ESP_SLEEP_WAKEUP_GPIO)
         key_guard_arm(&wake_guard,esp_timer_get_time(),10000000);
@@ -334,46 +386,81 @@ void app_main(void) {
     for (;;) {
         vibe_msg_t msg;
         bool have=xQueueReceive(v_queue,&msg,pdMS_TO_TICKS(vibe_model_wait_ms(&v_model,vibe_now())))==pdTRUE;
+        bool key_screen_visible=have && msg.type==V_MSG_KEY && (msg.event&V_KEY_SCREEN_VISIBLE);
+        if (have && msg.type==V_MSG_KEY) msg.event&=~V_KEY_SCREEN_VISIBLE;
         xSemaphoreTake(v_mutex,portMAX_DELAY);
         uint64_t now=vibe_now();
-        v_status.peer=v_status.peer_seen_ms && now-v_status.peer_seen_ms<vibe_peer_timeout(v_status.heartbeat_ms) && v_status.wifi;
+        bool had_radio_peer=v_status.peer && v_status.radio_pcm;
+        v_status.peer=v_status.peer_seen_ms && now-v_status.peer_seen_ms<6000 && (v_status.wifi || v_status.ble_peer);
+        if (!had_radio_peer && v_status.peer && v_status.radio_pcm && v_model.radio_active && v_model.radio_requested && !v_model.recording) vibe_audio_request(V_RADIO_CHANGED);
         v_model.enter_ready=v_status.peer && v_status.hotkey_ready && v_status.token[0];
         /* A prior codec failure must not disable Enter or prevent a wake retry. */
         v_model.voice_ready=v_model.enter_ready && v_status.audio_ready;
+        if (input_overflow) {
+            memset(&prompt_input,0,sizeof(prompt_input));prompt_input.consumed=7;
+        }
         if (input_overflow || (v_model.recording && !v_model.voice_ready)) {
             input_overflow=false; v_model.recording=false; execute(V_STOP_AUDIO);
             memset(held,0,sizeof(held));
         }
-        if (have && msg.type==V_MSG_JSON) { receive_json(msg.json);vibe_message_release(&msg); }
+        if (have && msg.type==V_MSG_JSON) { if (vibe_network_generation_matches(msg.link_generation)) receive_json(msg.json);vibe_message_release(&msg); }
         if (have && msg.type==V_MSG_PROVISION) {
-            v_model.page=msg.event ? V_PROVISION : V_HOME;
-            v_model.last_activity_ms=now; v_model.screen_on=true;
+            if (msg.event==1) vibe_model_provision_open(&v_model,now);
+            else vibe_model_provision_closed(&v_model,msg.event==2,v_status.peer,now);
         }
+        vibe_model_connection_complete(&v_model,v_status.peer && v_status.token[0],now);
+        static bool requested_setup_close;
+        bool finish_guide=v_model.page==V_PROVISION && vibe_model_connection_page(v_model.provision_return) &&
+            !v_model.connection_from_menu && v_status.peer && v_status.token[0];
+        if (finish_guide && !requested_setup_close) requested_setup_close=vibe_provision_connected();
+        if (!finish_guide) requested_setup_close=false;
         if (have && msg.type==V_MSG_AUDIO_FAIL) { v_model.recording=false; v_status.audio_fault=true; }
+        vibe_connect_tick(&v_status.connection_request,now);
+        bool connection_prompt=v_status.connection_request.phase==V_CONNECT_PENDING;
+        uint32_t prompt_frame=vibe_ui_connection_frame(v_status.connection_request.request);
+        vibe_prompt_input_sync(&prompt_input,connection_prompt,v_status.connection_request.request,prompt_frame);
+        static uint32_t reported_prompt_frame;
+        if (!connection_prompt) reported_prompt_frame=0;
+        else if (prompt_frame && prompt_frame!=reported_prompt_frame && atomic_load_explicit(&screen_visible,memory_order_acquire)) {
+            reported_prompt_frame=prompt_frame;
+            ESP_LOGI(TAG,"Connection confirmation visible frame=%lu",(unsigned long)prompt_frame);
+        }
+        if (have && msg.type==V_MSG_KEY && msg.key>=0 && msg.key<3) {
+            int k=msg.key;
+            vibe_event_t event=msg.event==BSP_BTN_PRESS?V_PRESS:msg.event==BSP_BTN_RELEASE?V_RELEASE:V_LONG;
+            vibe_input_result_t result=vibe_prompt_input_event(&prompt_input,k,event,key_screen_visible,msg.ui_frame);
+            if (result!=V_INPUT_PASS) {
+                if (result==V_INPUT_ACCEPT || result==V_INPUT_REJECT)
+                    vibe_connect_decide(&v_status.connection_request,result==V_INPUT_ACCEPT,now);
+                held[k]=false;long_press[k]=false;msg.type=V_MSG_CONNECTION_CHANGED;
+            }
+        }
+        if (connection_prompt) { v_model.screen_on=true;v_model.last_activity_ms=now; }
         if (have && msg.type==V_MSG_KEY && msg.key>=0 && msg.key<3) {
             const int k=msg.key;
             /* Dismiss first, then deliver this exact gesture to the application.
              * Never consume a press or synthesize a second click/release. */
-            if (msg.event==BSP_BTN_PRESS) vibe_agent_dismiss(&v_status.agent_alert);
+            if (msg.event==BSP_BTN_PRESS && key_screen_visible) vibe_agent_dismiss(&v_status.agent_alert);
             const vibe_page_t before_page=v_model.page;
             const vibe_timer_t before_timer=v_model.timer;
             unsigned a=0;
-            if (msg.event==BSP_BTN_PRESS) { held[k]=true; long_press[k]=false; a=vibe_model_key(&v_model,k,V_PRESS,now); }
+            if (msg.event==BSP_BTN_PRESS) {
+                if (!key_screen_visible) v_model.screen_on=false;
+                held[k]=true;long_press[k]=false;a=vibe_model_key(&v_model,k,V_PRESS,now);
+            }
             else if (msg.event==BSP_BTN_LONG && held[k]) { long_press[k]=true; a=vibe_model_key(&v_model,k,V_LONG,now); }
             else if (msg.event==BSP_BTN_RELEASE && held[k]) {
                 held[k]=false; a=vibe_model_key(&v_model,k,V_RELEASE,now);
                 if (!long_press[k]) a|=vibe_model_key(&v_model,k,V_CLICK,now);
             }
-            if (v_model.page==V_PROVISION && k==V_SETTINGS && msg.event==BSP_BTN_LONG) {
-                vibe_provision_finish();
-            }
+            if (a&(V_START_AUDIO|V_ENTER)) vibe_agent_dismiss(&v_status.agent_alert);
             execute(a);
             /* Bounded per-gesture diagnostics: no audio, network or credentials. */
             ESP_LOGI(TAG,"key=%d event=%d page=%d->%d timer=%d->%d left=%llu",k,msg.event,
                 before_page,v_model.page,before_timer,v_model.timer,
                 (unsigned long long)vibe_model_remaining(&v_model,now));
         }
-        if (vibe_agent_tick(&v_status.agent_alert,now,v_model.recording || v_model.page==V_PROVISION))
+        if (vibe_agent_tick(&v_status.agent_alert,now,v_model.recording || v_model.page==V_PROVISION || connection_prompt))
             execute(V_AGENT_ALERT);
         execute(vibe_model_tick(&v_model,now));
         if (v_status.agent_alert.visible) { v_model.screen_on=true;v_model.last_activity_ms=now; }
@@ -385,8 +472,8 @@ void app_main(void) {
             int soc=bsp_battery_soc();
             xSemaphoreTake(v_mutex,portMAX_DELAY); v_status.battery=soc; xSemaphoreGive(v_mutex); battery_at=now;
         }
-        if (bl!=last_bl) {
-            if (!bl) bsp_display_backlight(0);
+        if (bl!=last_bl || (bl && !atomic_load_explicit(&screen_visible,memory_order_acquire))) {
+            if (!bl) { atomic_store_explicit(&screen_visible,false,memory_order_release);bsp_display_backlight(0); }
             if (bl && !screen_awake) {
                 ESP_ERROR_CHECK(esp_pm_lock_acquire(screen_pm_lock));
                 screen_awake=true;
@@ -394,7 +481,7 @@ void app_main(void) {
             // Process/enqueue voice and notification actions before the panel's
             // blocking wake. Neither the model nor its mutex sleeps with LVGL.
             if (bsp_lvgl_set_sleep(!bl)==ESP_OK) {
-                if (bl) { vibe_ui_refresh(); bsp_display_backlight(bl); }
+                if (bl) { vibe_ui_refresh();bsp_display_backlight(bl);atomic_store_explicit(&screen_visible,true,memory_order_release); }
                 else if (screen_awake) {
                     ESP_ERROR_CHECK(esp_pm_lock_release(screen_pm_lock));
                     screen_awake=false;

@@ -59,12 +59,29 @@ struct AgentEvent:Codable,Identifiable {
     var deviceBody:[String:Any] { ["agent":agent.rawValue,"kind":kind.rawValue] }
 }
 
+struct AgentInstallNotice:Identifiable {
+    let id=UUID()
+    let agent:AgentID
+    var title:String { agent == .dsh ? "插件已准备，请完成 Agent 内安装" : agent.title+" 集成已安装" }
+    var instructions:String {
+        switch agent {
+        case .codex:
+            return "在 Codex 内审核并信任新 Hook 后，开始一轮新对话。\n\n终端版：输入 /hooks，查看并信任 Vibe 伴侣 Hook。\n桌面版：进入“设置 → Hooks”，查看并信任 Vibe 伴侣 Hook。"
+        case .dsh:
+            return "桌面版还需要手动添加插件：\n\n1. 点击“复制插件路径”。\n2. 在 DSH 中进入“插件 → 添加插件”。\n3. 粘贴路径并安装，按 DSH 提示确认或启用插件。\n\n终端版安装结果请查看下方提示。"
+        default:
+            return "请重新打开或重新加载 \(agent.title) 会话，使新集成生效。\n\n如果 Agent 显示 Hook 或插件的启用、信任或权限确认，请先查看内容，再在 Agent 内确认。"
+        }
+    }
+}
+
 // Main-queue owner. Bounded, ephemeral; no transcript polling or extra keepalive.
 final class AgentCenter:ObservableObject {
     @Published var integrations:[AgentIntegration]=[]
     @Published var recent:[AgentEvent]=[]
     @Published var message=""
     @Published var busy=false
+    @Published var installationNotice:AgentInstallNotice?
     @Published var dshPathCopied=false
     @Published var enabled=UserDefaults.standard.object(forKey:"agentAlertsEnabled") as? Bool ?? true {
         didSet { if !preview { UserDefaults.standard.set(enabled,forKey:"agentAlertsEnabled") } }
@@ -114,7 +131,12 @@ final class AgentCenter:ObservableObject {
             let result:Result<String,Error>=Result { try AgentInstaller.change(row,install:install) }
             DispatchQueue.main.async { [weak self] in
                 guard let self=self else { return };self.busy=false
-                switch result {case .success(let text):self.message=text;case .failure(let error):self.message=error.localizedDescription}
+                switch result {
+                case .success(let text):
+                    self.message=text
+                    if install { self.installationNotice=AgentInstallNotice(agent:row.agent) }
+                case .failure(let error):self.message=error.localizedDescription
+                }
                 self.refresh()
             }
         }

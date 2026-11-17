@@ -187,8 +187,8 @@ enum AgentInstaller {
         if let toml=toml,let content=tomlData { try privateWrite(content,to:toml) }
         try privateWrite(encoded,to:file)
         if !install { return "已移除 Vibe 伴侣集成，其他配置已保留" }
-        if row.agent == .codex { return "已安装，等待验证。请在 Codex 的 /hooks 或桌面端「设置 → Hooks」中信任新 Hook，再开始一轮对话。" }
-        return "已安装，等待验证。请重新打开对应 Agent 会话；收到真实事件后会显示记录。"
+        if row.agent == .codex { return "已安装。请在 Codex 的 /hooks 或桌面端「设置 → Hooks」中信任新 Hook，再开始一轮对话。" }
+        return "已安装。请重新打开或重新加载对应 Agent 会话，使集成生效。"
     }
     static func stage(_ source:String,name:String)throws->URL {
         guard let resources=Bundle.main.resourceURL else { throw AgentInstallError(text:"插件资源缺失") }

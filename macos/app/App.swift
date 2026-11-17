@@ -38,18 +38,23 @@ final class AppDelegate:NSObject,NSApplicationDelegate,NSWindowDelegate {
         NSWorkspace.shared.notificationCenter.addObserver(self,selector:#selector(didWake),name:NSWorkspace.didWakeNotification,object:nil)
     }
     func applicationDidBecomeActive(_ notification:Notification) { refreshPermission() }
+    func applicationDidResignActive(_ notification:Notification) { permissionReloaded=false }
     func windowDidBecomeKey(_ notification:Notification) { refreshPermission() }
     private func refreshPermission() {
         guard let m=model,!m.preview,!permissionProbeRunning else { return }
-        if Shortcut.permitted { permissionReloaded=false;awaitingPermissionReturn=false;m.engine.retry();return }
-        guard !permissionReloaded else { return } // Never enter an automatic restart loop.
+        // PostEvent preflight can cache both grants and denials. Check a fresh
+        // process even when this instance still reports an old grant.
+        guard !permissionReloaded else { m.engine.retry(resume:false);return } // One reload per activation.
         permissionProbeRunning=true;m.permissionChecking=true
         DispatchQueue.global(qos:.utility).async { [weak self] in
             let granted=PermissionProbe.check()
             DispatchQueue.main.async {
                 guard let self=self,let m=self.model else { return }
                 self.permissionProbeRunning=false;m.permissionChecking=false
-                guard PermissionRecoveryPolicy.shouldReload(current:Shortcut.permitted,fresh:granted,returnedFromSettings:self.awaitingPermissionReturn,alreadyReloaded:self.permissionReloaded) else { m.engine.retry();return }
+                guard PermissionRecoveryPolicy.shouldReload(current:Shortcut.permitted,fresh:granted,returnedFromSettings:self.awaitingPermissionReturn,alreadyReloaded:self.permissionReloaded) else {
+                    if Shortcut.permitted { self.awaitingPermissionReturn=false }
+                    m.engine.retry(resume:false);return
+                }
                 // Defer the reload until in-flight saves/probes/capture finish.
                 if m.saving || m.radioLoading || m.radioChecking || m.state.recording {
                     DispatchQueue.main.asyncAfter(deadline:.now()+1) { [weak self] in self?.refreshPermission() };return
@@ -90,7 +95,9 @@ final class AppDelegate:NSObject,NSApplicationDelegate,NSWindowDelegate {
             exit(PermissionRelaunch.run(parent:CommandLine.arguments[i+1],resumeID:CommandLine.arguments[i+2]))
         }
         if CommandLine.arguments.contains("--permission-status") { print(Shortcut.permitted ? "granted" : "denied");return }
+        if let i=CommandLine.arguments.firstIndex(of:"--radio-stream-tests"),i+1<CommandLine.arguments.count,let url=URL(string:CommandLine.arguments[i+1]) { exit(RadioTests.streaming(base:url)) }
         if CommandLine.arguments.contains("--self-test") { NativeTests.run();return }
+        if CommandLine.arguments.contains("--ble-device-test") { exit(HardwareConnectionTests.runBLE()) }
         let app=NSApplication.shared;let delegate=AppDelegate();app.delegate=delegate
         app.setActivationPolicy(.accessory);app.run();withExtendedLifetime(delegate){}
     }

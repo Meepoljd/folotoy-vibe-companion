@@ -2,6 +2,14 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+/* The computer sees return-path loss that incoming beacons cannot reveal. */
+static inline bool vibe_peer_use_wifi(uint64_t now,uint64_t wifi_seen,uint64_t ble_seen,
+                                     bool has_wifi,bool has_ble,bool prefer_ble) {
+    bool wifi_fresh=has_wifi && wifi_seen && now>=wifi_seen && now-wifi_seen<3000;
+    bool ble_fresh=has_ble && ble_seen && now>=ble_seen && now-ble_seen<3000;
+    return wifi_fresh && !(prefer_ble && ble_fresh);
+}
+
 /* Endpoint fields use the socket's network byte order; compare both fields. */
 static inline bool vibe_peer_matches(uint32_t address,uint16_t port,uint32_t from_address,uint16_t from_port) {
     return address && port && address==from_address && port==from_port;
@@ -16,4 +24,13 @@ static inline bool vibe_peer_heartbeat_due(uint64_t now,uint64_t sent,uint64_t s
     /* Ordinary traffic replaces fallback pings. Legacy peers retain 5/15 s. */
     return has_peer && seen && now>=seen && now-seen<vibe_peer_timeout(interval_ms) &&
            now>=sent && now-sent>=interval_ms+2000;
+}
+
+/* Discovery never acquires the control endpoint. Only authenticated traffic,
+ * or a correctly addressed physical-code pairing, may claim an idle lease. */
+static inline bool vibe_peer_claim_allowed(bool authenticated,bool pairing,bool occupied,bool same_endpoint) {
+    return (authenticated || pairing) && (!occupied || same_endpoint);
+}
+static inline bool vibe_peer_generation_matches(uint32_t request,uint32_t current) {
+    return !request || request==current;
 }

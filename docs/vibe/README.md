@@ -6,6 +6,8 @@ For the project overview, see the [root README](../../README.en.md). This guide
 covers the device; [Mac installation](install.md) covers the companion and
 [Agent integration](agents.md) covers hooks and plugins.
 
+See [Device connections](connections.md) for LAN/BLE pairing and switching computers.
+
 ## First setup
 
 ### Install firmware
@@ -30,31 +32,44 @@ Developers preserving existing settings should use the compatible application
 partition workflow in [firmware layout](../development/engineering/firmware-layout.md).
 The release image is a complete install, not a promise of data-preserving updates.
 
-### Add Wi-Fi
+### Choose a connection
 
-On first boot, join the open `Vibe-Setup-...` hotspot shown on the device with
-your phone. The setup page should open automatically; otherwise visit
-`http://192.168.4.1`. Select a **2.4 GHz** network, enter its password and connect.
+A new device shows a connection welcome page with Bluetooth, Wi-Fi and Later
+on its physical key rail. BLE works without device networking. In Vibe Companion,
+choose the matching device suffix, click Connect and confirm on the device.
+BLE advertising is already active on the welcome page; the computer can request
+a connection before a transport guide is selected. Later is remembered.
+Reopen the guide from **Functions → Device settings → Connect computer**.
+Previously paired devices go straight Home and reconnect after an update.
+
+### Add Wi-Fi (optional)
+
+Choose **Wi-Fi** on the welcome page or **Functions → Device settings → Wi-Fi**.
+Join the open `Vibe-Setup-...` hotspot shown on the device with
+your phone and wait for its setup page to open. If it has not appeared after
+10 seconds, open `http://192.168.4.1/` in a browser. Select a **2.4 GHz** network,
+enter its password and connect.
 After successful connection and saving, the hotspot closes and the device
-returns Home. There is no second confirmation. A browser tab may retain a
+continues waiting for computer approval during first use; authorization is required
+before returning Home. A browser tab may retain a
 success message if the phone does not allow automatic closing.
 
 The device remembers up to five networks. Boot and reconnect try the last
 successful network and then other saved networks automatically. To add a network,
-open **Functions → Device settings → Wi-Fi setup** on the device. The phone page
+open **Functions → Device settings → Wi-Fi** on the device. The phone page
 lets you connect to saved networks without retyping passwords, update passwords,
 or forget a network. Forgetting the active network removes its saved record but
 does not terminate that connection immediately. No other account/profile setup
 is required.
+An unavailable saved network never opens the hotspot or forces Wi-Fi setup.
 
 ### Pair the computer
 
 Install the app, BlackHole 2ch and a compatible input method using the
-[Mac guide](install.md). Keep the computer and device on a reachable LAN; guest
-network/client isolation can prevent discovery. The app chooses an available
-client port automatically.
+[Mac guide](install.md). Wi-Fi requires a reachable LAN;
+BLE does not require the device to join a network. See [Device connections](connections.md).
 
-Enter the device's six-digit pairing code in the app. In the input method,
+Click the device’s **Connect** button and accept with its upper key. In the input method,
 select **BlackHole 2ch** and a hold-to-talk shortcut matching the companion.
 Grant keyboard-control permission to the **app itself**. Permission previously
 given to Terminal is separate. The current version pairs one device with one
@@ -79,10 +94,11 @@ SETTINGS is at the bottom. The firmware BSP calls SETTINGS `OK`.
 One hold/release is one action; releasing a hold does not add an Enter or confirm
 an exit. The rail on the right shows the meaning in the current context.
 
-In Home, UP can wake the screen and start voice in one gesture. DOWN can wake
-and perform its short/long action. SETTINGS wakes the weather screen without
-also turning a page, but starts/pauses the active timer in one press. Other
-pages consume the first press to wake before performing navigation.
+On a sleeping Home screen, ready voice input (UP) and a ready short Enter
+(DOWN) execute while waking. Every other gesture only wakes, including its
+hold and release; press again to operate the timer, radio or page. Connection
+requests wake the screen automatically. Confirm/cancel accepts a new gesture
+only after the request is rendered and all previous keys have been released.
 
 ## Pomodoro
 
@@ -100,7 +116,7 @@ Changing configured durations affects the next phase, not the active deadline.
 
 Weather is always enabled. Choose its city in the app; the initial city is
 Beijing. Tap SETTINGS to read four cached pages. Pages do not turn automatically
-and return to current conditions after screen wake.
+and the current reading page is retained across screen sleep and wake.
 
 | Page | Contents |
 | --- | --- |
@@ -109,8 +125,9 @@ and return to current conditions after screen wake.
 | Air and wind | US AQI, PM2.5 concentration, wind, gusts and daily maximum wind |
 | Three days | Daily condition icons, high/low and rain information |
 
-Data comes from [Open-Meteo](https://open-meteo.com/) and normally refreshes every
-15 minutes, independently of the computer. Missing samples use a dash; stale
+Data comes from [Open-Meteo](https://open-meteo.com/). The connected desktop app
+normally refreshes it every 15 minutes while audio is idle, over Wi-Fi or BLE.
+The device retains direct Wi-Fi downloading as a fallback when memory permits. Missing samples use a dash; stale
 weather retains its age, and air older than 30 minutes is hidden. Wind is shown
 on the Beaufort scale. **US AQI is not China AQI**; PM2.5 is in µg/m³. UV shows a
 number and a level rather than color alone. Turning a page makes no network
@@ -123,7 +140,12 @@ or **Custom** to build My stations, then drag to order and save. Up to 20
 stations are supported. Search can be empty; the Chinese checkbox is optional.
 Custom addresses must be supported public audio/playlist URLs, not web pages.
 The app probes for recognizable media before adding a custom station; a Mac
-probe passing does not guarantee playback on the ESP32.
+probe passing does not guarantee continuous delivery by that broadcaster.
+
+Keep the desktop app running and the computer online. The Mac fetches and decodes
+MP3/AAC/HLS; the device plays the resulting audio over Wi-Fi or BLE. Device Wi-Fi
+is optional. Both links can stay connected; only one carries radio at a time,
+with acknowledgements and fallback. The speaker receives 16 kHz mono audio.
 
 SETTINGS advances to the next station. Hold UP for voice: playback resources
 are released, voice gets priority, and the previous listening intent reconnects

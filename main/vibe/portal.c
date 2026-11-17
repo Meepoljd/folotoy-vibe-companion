@@ -5,6 +5,7 @@
 #else
 #include <sys/socket.h>
 #include <netinet/in.h>
+#include <sys/select.h>
 #endif
 
 bool vibe_portal_local_address(const struct sockaddr *address,size_t length) {
@@ -55,4 +56,29 @@ size_t vibe_portal_dns_reply(const uint8_t *query,size_t length,uint8_t *reply,s
         memcpy(reply+end,record,sizeof(record)); end+=sizeof(record);
     }
     return end;
+}
+
+int vibe_portal_wait(int data_socket,int dns_socket,unsigned timeout_ms) {
+    if (data_socket<0) return -1;
+    fd_set readable;FD_ZERO(&readable);FD_SET(data_socket,&readable);
+    int maximum=data_socket;
+    if (dns_socket>=0) { FD_SET(dns_socket,&readable);if (dns_socket>maximum) maximum=dns_socket; }
+    struct timeval timeout={.tv_sec=timeout_ms/1000,.tv_usec=(timeout_ms%1000)*1000};
+    int ready=select(maximum+1,&readable,NULL,NULL,&timeout);
+    if (ready<=0) return ready;
+    return (FD_ISSET(data_socket,&readable)?VIBE_PORTAL_DATA_READY:0) |
+        (dns_socket>=0 && FD_ISSET(dns_socket,&readable)?VIBE_PORTAL_DNS_READY:0);
+}
+unsigned vibe_portal_dns_poll(int dns_socket) {
+    if (dns_socket<0) return 0;
+    static uint8_t query[513],reply[512];
+    unsigned received=0;
+    for (;received<VIBE_PORTAL_DNS_BATCH;received++) {
+        struct sockaddr_in from;socklen_t from_len=sizeof(from);
+        int n=recvfrom(dns_socket,query,sizeof(query),MSG_DONTWAIT,(struct sockaddr *)&from,&from_len);
+        if (n<0) break;
+        size_t count=vibe_portal_dns_reply(query,(size_t)n,reply,sizeof(reply));
+        if (count) sendto(dns_socket,reply,count,MSG_DONTWAIT,(struct sockaddr *)&from,from_len);
+    }
+    return received;
 }

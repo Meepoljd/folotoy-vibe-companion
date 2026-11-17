@@ -232,6 +232,8 @@ try canvas(width: 1600, height: 880, output: output.appendingPathComponent("vibe
          size: 66, weight: .semibold, ink: 0xf0f2e7, lineHeight: 90)
     text("语音输入，随手可用。\nAI 需要你时，即刻提醒。", x: 84, y: 520, width: 650,
          size: 25, ink: 0xb0c5ba, lineHeight: 37)
+    text("蓝牙 / Wi-Fi，都能连接。\n公司网络不便接入？用蓝牙直接连电脑。", x: 84, y: 650,
+         width: 650, size: 23, ink: 0xb3cdbd, lineHeight: 35)
     device(weather, x: 782, y: 294, width: 270)
     device(alert, x: 1120, y: 135, width: 340)
     text("语音输入  /  Agent 提醒  /  番茄钟  /  天气  /  收音机",
@@ -258,13 +260,15 @@ try canvas(width: 576, height: 768, output: output.appendingPathComponent("vibe-
     NSGradient(starting: color(0x0b1d20), ending: color(0x1b3d35))!.draw(in: bounds, angle: -35)
     mark(x: 38, y: 35, size: 44)
     text("Vibe 伴侣", x: 96, y: 36, width: 420, size: 27, weight: .semibold)
-    text("语音输入、AI 提醒，你的 Vibe Coding 伴侣。", x: 98, y: 75, width: 430, size: 13, ink: 0xa9c8b5)
-    text("开口即输入。\nAI 有事会叫你。", x: 36, y: 137, width: 510,
-         size: 42, weight: .semibold, lineHeight: 54)
-    text("无线语音  ·  Agent 提醒  ·  专注计时", x: 39, y: 264,
-         width: 510, size: 16, ink: 0xb3cdbd)
-    screen(weather, in: NSRect(x: 36, y: 348, width: 225, height: 300), radius: 18)
-    screen(alert, in: NSRect(x: 285, y: 318, width: 252, height: 336), radius: 19)
+    text("按住说话 · 松开结束 · 一键回车", x: 98, y: 75, width: 430, size: 13, ink: 0xa9c8b5)
+    text("语音输入、AI 提醒，\n你的 Vibe Coding 伴侣。", x: 36, y: 130, width: 510,
+         size: 38, weight: .semibold, lineHeight: 54)
+    text("蓝牙 / Wi-Fi，都能连接。", x: 39, y: 254,
+         width: 510, size: 18, weight: .medium, ink: 0xb3cdbd)
+    text("公司网络不便接入？用蓝牙直接连电脑。", x: 39, y: 290,
+         width: 510, size: 14, ink: 0xa9c8b5)
+    screen(weather, in: NSRect(x: 36, y: 356, width: 225, height: 300), radius: 18)
+    screen(alert, in: NSRect(x: 285, y: 328, width: 252, height: 336), radius: 19)
     text("把常用功能，留在手边。", x: 39, y: 685,
          width: 500, size: 25, weight: .medium)
     text("语音  /  天气  /  番茄钟  /  收音机", x: 40, y: 729,

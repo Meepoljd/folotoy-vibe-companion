@@ -14,7 +14,7 @@ inline constexpr RadioStation kRadioPresets[] = {
     {"CNR-1 中国之声", "推荐电台", "https://lhttp.qtfm.cn/live/15318317/64k.mp3", 0},
     {"CNR-2 经济之声", "推荐电台", "http://ngcdn002.cnr.cn/live/jjzs/index.m3u8", 0},
     {"CNR-9 文艺之声", "推荐电台", "http://satellitepull.cnr.cn/live/wxwyzs/playlist.m3u8", 0},
-    {"新闻联播", "推荐电台", "https://rfienchinois64k.ice.infomaniak.ch//rfienchinois-64.mp3", 0},
+    {"RFI 法广中文广播", "推荐电台", "https://rfienchinois64k.ice.infomaniak.ch/rfienchinois-64.mp3", 0},
     {"CCTV-10科教伴音", "推荐电台", "https://piccpndali.v.myalicdn.com/audio/cctv10_2.m3u8", 0},
     {"第一财经", "推荐电台", "http://lhttp.qingting.fm/live/276/64k.mp3", 0},
     {"国际新闻", "推荐电台", "https://lhttp.qtfm.cn/live/20500172/64k.mp3", 0},

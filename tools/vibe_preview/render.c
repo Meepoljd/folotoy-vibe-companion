@@ -30,6 +30,12 @@ static void flush(lv_display_t *display,const lv_area_t *area,uint8_t *data) {
         memcpy(pixels+y*240+area->x1,data+(y-area->y1)*(area->x2-area->x1+1)*2,(area->x2-area->x1+1)*2);
     lv_display_flush_ready(display);
 }
+static bool visible_text(lv_obj_t *object,const char *text) {
+    if(lv_obj_has_flag(object,LV_OBJ_FLAG_HIDDEN)) return false;
+    if(lv_obj_check_type(object,&lv_label_class) && !strcmp(lv_label_get_text(object),text)) return true;
+    for(unsigned i=0;i<lv_obj_get_child_count(object);i++) if(visible_text(lv_obj_get_child(object,i),text)) return true;
+    return false;
+}
 static void check_text_layout(lv_obj_t *object,const char *fixture) {
     if (lv_obj_has_flag(object,LV_OBJ_FLAG_HIDDEN)) return;
     if (lv_obj_check_type(object,&lv_label_class)) {
@@ -102,7 +108,7 @@ static void popup_checks(const char *directory) {
             if (context==8) model.page=V_POMODORO;
         }
         if (context==5 || context==10) {
-            model.radio_active=true;model.radio_requested=true;model.radio_count=6;status.radio_state=V_RADIO_PLAYING;
+            model.radio_active=true;model.radio_requested=true;model.radio_count=6;status.radio_pcm=true;status.radio_state=V_RADIO_PLAYING;
             strcpy(status.radio_name,"怀旧音乐");strcpy(status.radio_description,"清晨音乐");
             if (context==10) model.page=V_RADIO_EXIT;
         }
@@ -149,6 +155,77 @@ static void popup_checks(const char *directory) {
     printf("Popup matched full-frame draw: largest extra peak=%u bytes, largest frame peak=%u bytes\n",largest_draw_delta,largest_frame_peak);
     puts("Popup: all four events / both themes / eleven backgrounds, exact outside pixels, restoration and 2200 cycles: PASS");
 }
+static void connection_checks(const char *directory) {
+    for (unsigned theme=0;theme<2;theme++) for (unsigned context=0;context<3;context++) {
+        vibe_model_init(&model,now);model.page=context==2?V_SETTINGS_PAGE:V_HOME;model.weather_page=context;
+        status.appearance.mode=theme?V_THEME_LIGHT:V_THEME_DARK;
+        status.connection_request=(vibe_connection_request_t){0};vibe_ui_refresh();lv_refr_now(NULL);
+        unsigned objects=object_count(lv_screen_active());
+        status.connection_request=(vibe_connection_request_t){.phase=V_CONNECT_PENDING,.replacing=context!=0};
+        strcpy(status.connection_request.request,"11111111-1111-1111-1111-111111111111");
+        strcpy(status.connection_request.name,"Lialun MacBook Pro");
+        vibe_ui_refresh();assert(!vibe_ui_connection_frame(status.connection_request.request));
+        char name[64];snprintf(name,sizeof(name),"connection-%s-%u",theme?"light":"dark",context);
+        capture(directory,name);assert(object_count(lv_screen_active())==objects);
+        uint32_t first_frame=vibe_ui_connection_frame(status.connection_request.request);assert(first_frame);
+        strcpy(status.connection_request.request,"22222222-2222-2222-2222-222222222222");
+        vibe_ui_refresh();assert(!vibe_ui_connection_frame(NULL));
+        lv_refr_now(NULL);
+        assert(vibe_ui_connection_frame(status.connection_request.request) && vibe_ui_connection_frame(NULL)!=first_frame);
+        assert(!vibe_ui_connection_frame("11111111-1111-1111-1111-111111111111"));
+        strcpy(status.connection_request.name,"Company MacBook Pro Development Office Station");
+        status.connection_request.name[48]=0;
+        lv_point_t measured;lv_text_get_size(&measured,status.connection_request.name,&lv_font_montserrat_20,0,0,198,LV_TEXT_FLAG_NONE);
+        assert(measured.y<=140);
+        char wide[49];memset(wide,'W',48);wide[48]=0;lv_text_get_size(&measured,wide,&lv_font_montserrat_20,0,0,198,LV_TEXT_FLAG_NONE);
+        assert(measured.y<=140);
+        snprintf(name,sizeof(name),"connection-long-%s-%u",theme?"light":"dark",context);capture(directory,name);
+        status.connection_request.phase=V_CONNECT_DENIED;vibe_ui_refresh();assert(!vibe_ui_connection_frame(NULL));lv_refr_now(NULL);
+    }
+    puts("Connection confirmation: physical key rail, both themes, three backgrounds, bounded names and unchanged redraw PASS");
+}
+static void onboarding_checks(const char *directory) {
+    const vibe_page_t pages[]={V_CONNECT_GUIDE,V_COMPUTER_GUIDE,V_PROVISION};
+    lv_point_t measured;
+    lv_text_get_size(&measured,"Wi\nFi",&lv_font_montserrat_14,0,0,20,LV_TEXT_FLAG_NONE);
+    assert(measured.x<=20 && measured.y<=44);
+    for (unsigned theme=0;theme<2;theme++) {
+        vibe_model_init(&model,now);status.appearance.mode=theme?V_THEME_LIGHT:V_THEME_DARK;
+        memset(&status.connection_request,0,sizeof(status.connection_request));
+        memset(&status.agent_alert,0,sizeof(status.agent_alert));
+        strcpy(status.device_id,"4c11ae2f6bac");strcpy(status.ap_name,"Vibe-Setup-2F6BAC");
+        status.notice[0]=0;status.wifi=false;status.peer=false;status.ble_peer=false;
+        vibe_ui_refresh();lv_refr_now(NULL);lv_mem_monitor_t home_memory;lv_mem_monitor(&home_memory);
+        unsigned home_used=home_memory.total_size-home_memory.free_size;
+        for (unsigned state=0;state<5;state++) {
+            model.page=pages[state<3?state:1];model.guide_wifi=state==3;status.wifi=state==3;
+            model.connection_from_menu=state==4;
+            status.peer=state==4;memset(status.token,state==4?'a':0,64);status.token[64]=0;
+            char name[64];snprintf(name,sizeof(name),"onboarding-%s-%u",theme?"light":"dark",state);capture(directory,name);
+            lv_mem_monitor_t mem;lv_mem_monitor(&mem);
+            assert(object_count(lv_screen_active())==6 && mem.total_size-mem.free_size<home_used);
+        }
+        model.page=V_PROVISION;
+        strcpy(status.notice,"连接失败，请检查密码和 2.4GHz Wi-Fi");
+        char notice_name[64];snprintf(notice_name,sizeof(notice_name),"onboarding-wifi-notice-%s",theme?"light":"dark");capture(directory,notice_name);
+        status.notice[0]=0;
+        model.page=V_CONNECT_GUIDE;vibe_ui_refresh();lv_refr_now(NULL);
+        unsigned objects=object_count(lv_screen_active());lv_mem_monitor_t before,after;lv_mem_monitor(&before);
+        for (unsigned cycle=0;cycle<300;cycle++) {
+            model.page=pages[cycle%3];model.connection_from_menu=cycle%2;vibe_ui_refresh();lv_refr_now(NULL);
+            assert(object_count(lv_screen_active())==objects);
+            lv_mem_monitor(&after);assert(after.total_size-after.free_size<=before.total_size-before.free_size+64);
+        }
+        status.connection_request.phase=V_CONNECT_PENDING;
+        strcpy(status.connection_request.name,"First Connection Mac");
+        strcpy(status.connection_request.request,"33333333-3333-3333-3333-333333333333");
+        char name[64];snprintf(name,sizeof(name),"onboarding-confirm-%s",theme?"light":"dark");capture(directory,name);
+        assert(vibe_ui_connection_frame(status.connection_request.request));
+        status.connection_request.phase=V_CONNECT_DENIED;vibe_ui_refresh();lv_refr_now(NULL);
+        assert(!vibe_ui_connection_frame(NULL));
+    }
+    puts("Onboarding: both themes, BLE/Wi-Fi/skip, physical Wi-Fi key fit, confirmation overlay and 600 bounded transitions PASS");
+}
 static void change_radio(unsigned index) {
     static const char *names[]={"经济之声","文艺之声","怀旧音乐","清晨音乐"};
     model.radio_index=index%4;strcpy(status.radio_name,names[index%4]);
@@ -157,7 +234,7 @@ static void change_radio(unsigned index) {
 static void radio_motion_checks(const char *directory) {
     vibe_model_init(&model,now);model.radio_active=model.radio_requested=true;model.radio_count=4;
     status.appearance.mode=V_THEME_DARK;status.wifi=status.peer=status.audio_ready=status.hotkey_ready=true;
-    status.radio_state=V_RADIO_PLAYING;memset(&status.agent_alert,0,sizeof(status.agent_alert));
+    status.radio_pcm=true;status.radio_state=V_RADIO_PLAYING;memset(&status.agent_alert,0,sizeof(status.agent_alert));
     strcpy(status.radio_description,"清晨音乐");strcpy(status.radio_name,"经济之声");
     capture(directory,"radio-motion-before");
     unsigned objects=object_count(lv_screen_active());
@@ -201,7 +278,7 @@ static void radio_exit_checks(const char *directory) {
         vibe_model_init(&model,now);model.voice_ready=model.enter_ready=true;
         model.radio_active=model.radio_requested=true;model.radio_count=4;model.radio_index=2;
         status.appearance.mode=theme?V_THEME_LIGHT:V_THEME_DARK;
-        status.wifi=status.peer=status.audio_ready=status.hotkey_ready=true;status.radio_state=V_RADIO_PLAYING;
+        status.wifi=status.peer=status.audio_ready=status.hotkey_ready=true;status.radio_pcm=true;status.radio_state=V_RADIO_PLAYING;
         memset(&status.agent_alert,0,sizeof(status.agent_alert));
         strcpy(status.radio_name,"文艺之声");strcpy(status.radio_description,"清晨音乐");
         capture(directory,theme?"light-radio-exit-before":"dark-radio-exit-before");
@@ -209,7 +286,7 @@ static void radio_exit_checks(const char *directory) {
         capture(directory,theme?"light-radio-exit":"dark-radio-exit");
         strcpy(status.radio_name,"这是一个十六字的中文电台名称测试");
         capture(directory,theme?"light-radio-exit-long":"dark-radio-exit-long");strcpy(status.radio_name,"文艺之声");
-        status.radio_state=V_RADIO_ERROR;capture(directory,theme?"light-radio-exit-error":"dark-radio-exit-error");status.radio_state=V_RADIO_PLAYING;
+        status.radio_state=V_RADIO_ERROR;capture(directory,theme?"light-radio-exit-error":"dark-radio-exit-error");status.radio_pcm=true;status.radio_state=V_RADIO_PLAYING;
         model.radio_count=0;model.radio_requested=false;capture(directory,theme?"light-radio-exit-empty":"dark-radio-exit-empty");
         model.radio_count=4;model.radio_requested=true;
         unsigned baseline_used=0,baseline_objects=0;
@@ -222,6 +299,8 @@ static void radio_exit_checks(const char *directory) {
             lv_mem_monitor_t before,after;lv_mem_monitor(&before);unsigned objects=object_count(lv_screen_active());
             unsigned used=before.total_size-before.free_size;
             if (!cycle) { baseline_used=used;baseline_objects=objects; }
+            if (used>baseline_used+32 || objects!=baseline_objects)
+                fprintf(stderr,"Radio exit pool theme=%u cycle=%u used=%u baseline=%u objects=%u/%u\n",theme,cycle,used,baseline_used,objects,baseline_objects);
             assert(used<=baseline_used+32 && objects==baseline_objects);
             down_hold();assert(model.page==V_RADIO_EXIT && model.radio_requested);
             vibe_ui_refresh();lv_refr_now(NULL);lv_mem_monitor(&after);
@@ -243,7 +322,7 @@ int main(int argc,char **argv) {
     lv_display_set_buffers(d,stripe,NULL,sizeof(stripe),LV_DISPLAY_RENDER_MODE_PARTIAL); lv_display_set_flush_cb(d,flush);
     vibe_model_init(&model,now); model.voice_ready=true; model.enter_ready=true;
     prefs=(vibe_prefs_t){.weather_enabled=true,.focus_minutes=25,.break_minutes=5,.volume=60}; strcpy(prefs.city,"北京");
-    status=(vibe_status_t){.wifi=true,.peer=true,.audio_ready=true,.hotkey_ready=true,.battery=72,.rssi=-50,.tz_minutes=480,.weather_at_ms=now}; strcpy(status.token,"preview");
+    status=(vibe_status_t){.wifi=true,.peer=true,.radio_pcm=true,.audio_ready=true,.hotkey_ready=true,.battery=72,.rssi=-50,.tz_minutes=480,.weather_at_ms=now}; strcpy(status.token,"preview");
     status.appearance=vibe_appearance_default();status.appearance.mode=V_THEME_DARK;vibe_signal_update(&status.signal,status.rssi);
     weather_fixture();
     if (argc==3) {
@@ -278,6 +357,28 @@ int main(int argc,char **argv) {
         }
     }
     status.battery=72;status.appearance.mode=V_THEME_DARK;
+    lv_font_glyph_dsc_t bluetooth_glyph;
+    assert(lv_font_get_glyph_dsc(&lv_font_montserrat_16,&bluetooth_glyph,0xf293,0));
+    assert(bluetooth_glyph.box_w>0 && bluetooth_glyph.resolved_font==&lv_font_montserrat_16);
+    for (unsigned theme=0;theme<2;theme++) for (unsigned connection=0;connection<4;connection++) {
+        status.appearance.mode=theme?V_THEME_LIGHT:V_THEME_DARK;
+        status.wifi=(connection&1)!=0;status.ble_peer=(connection&2)!=0;status.battery=100;
+        char name[64];snprintf(name,sizeof(name),"connections-%s-%u",theme?"light":"dark",connection);
+        capture(argv[1],name);
+        unsigned icon_pixels=0;int icon_x=status.wifi?28:17;uint16_t background=pixels[6*240+47];
+        for (int y=6;y<=25;y++) for (int x=icon_x;x<icon_x+18;x++)
+            if (pixels[y*240+x]!=background) ++icon_pixels;
+        assert((icon_pixels>0)==status.ble_peer);
+        unsigned bars=0;
+        for (unsigned child=0;child<lv_obj_get_child_count(lv_screen_active());child++) {
+            lv_obj_t *o=lv_obj_get_child(lv_screen_active(),child);
+            if (lv_obj_get_width(o)==3 && lv_obj_get_y(o)>=13 && lv_obj_get_y(o)<=19) {
+                ++bars;assert(lv_obj_has_flag(o,LV_OBJ_FLAG_HIDDEN)==!status.wifi);
+            }
+        }
+        assert(bars==3);
+    }
+    status.wifi=true;status.ble_peer=false;status.battery=72;status.appearance.mode=V_THEME_DARK;
     for (unsigned theme=0;theme<2;theme++) {
         status.appearance.mode=theme?V_THEME_LIGHT:V_THEME_DARK;
         vibe_agent_push(&status.agent_alert,theme+1,2,2,now,10000);
@@ -319,6 +420,12 @@ int main(int argc,char **argv) {
         status.appearance.mode=theme?V_THEME_LIGHT:V_THEME_DARK;
         for (unsigned i=0;i<4;i++) { char name[48];status.radio_state=radio_states[i];snprintf(name,sizeof(name),"%s-radio-%u",theme?"light":"dark",i);capture(argv[1],name); }
         model.radio_requested=false;capture(argv[1],theme?"light-radio-paused":"dark-radio-paused");model.radio_requested=true;
+        status.wifi=false;status.ble_peer=true;status.peer=true;status.radio_pcm=true;status.radio_state=V_RADIO_PLAYING;
+        capture(argv[1],theme?"light-radio-ble":"dark-radio-ble");
+        assert(visible_text(lv_screen_active(),"正在播放") && !visible_text(lv_screen_active(),"等待 Wi-Fi"));
+        status.radio_pcm=false;capture(argv[1],theme?"light-radio-old-client":"dark-radio-old-client");assert(visible_text(lv_screen_active(),"请更新电脑客户端"));
+        status.radio_pcm=true;status.peer=false;capture(argv[1],theme?"light-radio-no-computer":"dark-radio-no-computer");assert(visible_text(lv_screen_active(),"等待电脑"));
+        status.wifi=status.peer=true;status.ble_peer=false;
         model.recording=true;capture(argv[1],theme?"light-radio-speaking":"dark-radio-speaking");model.recording=false;
         model.radio_count=0;capture(argv[1],theme?"light-radio-empty":"dark-radio-empty");model.radio_count=6;
         strcpy(status.radio_name,"这是一个十六字的中文电台名称测试");capture(argv[1],theme?"light-radio-long-name":"dark-radio-long-name");strcpy(status.radio_name,"怀旧音乐");
@@ -330,7 +437,7 @@ int main(int argc,char **argv) {
     model.page=V_PROVISION;strcpy(status.ap_name,"Vibe-Setup-A1B2C3");capture(argv[1],"wifi-setup");
     model.page=V_HOME;model.timer=V_TIMER_READY;model.completion_until_ms=0;status.peer=false;capture(argv[1],"disconnected");
     status.wifi=false;capture(argv[1],"network-reconnecting");status.wifi=true;
-    status.token[0]=0;strcpy(status.pair_code,"123456");capture(argv[1],"pairing");
+    status.token[0]=0;capture(argv[1],"pairing");
     status.peer=true;strcpy(status.token,"preview");strcpy(prefs.city,"呼和浩特");
     status.forecast.temperature=-40;status.forecast.feels=-45;status.forecast.code=99;
     status.forecast.days[0]=(vibe_forecast_t){.low=-40,.high=-30,.code=99,.rain=100,.wind_valid=true,.wind_ms=56.1f,.uv_valid=true,.uv_tenths=500};
@@ -385,6 +492,8 @@ int main(int argc,char **argv) {
     capture(argv[1],"after-100-theme-switches");
     for (int i=0;i<100;i++) { model.weather_page=i%4;vibe_ui_refresh();lv_refr_now(NULL); }
     capture(argv[1],"after-100-weather-switches");
+    connection_checks(argv[1]);
+    onboarding_checks(argv[1]);
     popup_checks(argv[1]);
     radio_motion_checks(argv[1]);
     radio_exit_checks(argv[1]);

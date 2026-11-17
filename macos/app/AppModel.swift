@@ -16,6 +16,7 @@ final class AppModel: ObservableObject {
     @Published var permissionChecking=false
     var onPermissionRequested:(()->Void)?
     private var confirmedSettings:DeviceSettings?
+    private var requestedDevice:String?
     @Published var shortcut=UserDefaults.standard.string(forKey:"shortcut") ?? "ctrl+option+v"
     @Published var cityQuery=""
     @Published var cities:[City]=[]
@@ -78,9 +79,13 @@ final class AppModel: ObservableObject {
             radioStations=Array(RadioStation.presets.prefix(4));radioRevision=1;radioLoaded=true;radioCapacity=RadioStation.maximumCount
             return
         }
-        engine.onState = { [weak self] in self?.state=$0 }
-        engine.onSettings = { [weak self] prefs in
+        engine.onState = { [weak self] state in
             guard let self=self else { return }
+            if state.paired || (self.state.paired && !state.paired) { self.code="" }
+            self.state=state
+        }
+        engine.onSettings = { [weak self] prefs,source in
+            guard let self=self,(self.requestedDevice ?? self.state.device)==source else { return }
             let previous=self.confirmedSettings
             self.settings=previous.map { self.settings.keepingEdits(over:prefs,basedOn:$0) } ?? prefs
             self.confirmedSettings=prefs;self.loaded=true
@@ -97,8 +102,8 @@ final class AppModel: ObservableObject {
             let hasEdits=self.confirmedSettings.map { !self.settings.changes(comparedTo:$0).isEmpty } ?? false
             self.result=ok && hasEdits ? "已保存；还有新的修改尚未保存" : message
         }
-        engine.onRadio = { [weak self] stations,revision,capacity in
-            guard let self=self else { return }
+        engine.onRadio = { [weak self] stations,revision,capacity,source in
+            guard let self=self,(self.requestedDevice ?? self.state.device)==source else { return }
             let dirty=self.radioLoaded && self.radioStations != self.radioBaseline
             if !dirty || self.saving { self.radioStations=stations } else { self.result="设备列表已更新，未保存的草稿已保留" }
             self.radioBaseline=stations;self.radioRevision=revision;self.radioCapacity=capacity;self.radioLoaded=true
@@ -171,6 +176,15 @@ final class AppModel: ObservableObject {
             case .failure(let error):self.result=error.localizedDescription
             }
         }
+    }
+    var hasUnsavedDeviceEdits:Bool {
+        (confirmedSettings.map { !settings.changes(comparedTo:$0).isEmpty } ?? false) || (radioLoaded && radioStations != radioBaseline)
+    }
+    func selectDevice(_ id:String,via transport:ConnectionTransport?=nil) {
+        if id==state.device { engine.selectDevice(id,via:transport);return }
+        requestedDevice=id;loaded=false;confirmedSettings=nil;settings=DeviceSettings();radioLoaded=false
+        radioStations=[];radioBaseline=[];radioRevision=0;radioLoading=false;code="";result="";saving=false
+        engine.selectDevice(id,via:transport)
     }
     func saveShortcut() {
         guard !preview else { result="这是界面预览，快捷键不会修改";return }

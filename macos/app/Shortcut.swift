@@ -19,6 +19,31 @@ final class Shortcut {
         guard !keys.isEmpty, Set(keys).count==keys.count, keys.dropLast().allSatisfy({ modifiers[$0] != nil }) else { throw ShortcutError.invalid }
         return keys
     }
+    static func recordedSpec(_ keys:[CGKeyCode])->String? {
+        let names=keys.compactMap { code in codes.first(where:{$0.value==code})?.key }
+        let value=names.joined(separator:"+")
+        guard names.count==keys.count,(try? resolve(value)) != nil else { return nil }
+        return value
+    }
+    static func recordingModifiers(_ raw:UInt64)->[CGKeyCode] {
+        // Hardware events include device-side bits; some synthesized events
+        // carry only the aggregate flag. Use the left key in that case.
+        let groups:[(CGKeyCode,CGKeyCode,UInt64)]=[(59,62,1<<18),(58,61,1<<19),(56,60,1<<17),(55,54,1<<20)]
+        var keys:[CGKeyCode]=[]
+        for (left,right,aggregate) in groups where raw & aggregate != 0 {
+            let leftDown=raw & (modifiers[left]! & 0xffff) != 0
+            let rightDown=raw & (modifiers[right]! & 0xffff) != 0
+            if leftDown || !rightDown { keys.append(left) }
+            if rightDown { keys.append(right) }
+        }
+        if raw & (1<<23) != 0 { keys.append(63) }
+        return keys
+    }
+    static func displayKeys(_ spec:String)->[String] {
+        guard let keys=try? resolve(spec) else { return [spec] }
+        let labels:[CGKeyCode:String]=[55:"左 ⌘",54:"右 ⌘",56:"左 ⇧",60:"右 ⇧",58:"左 ⌥",61:"右 ⌥",59:"左 ⌃",62:"右 ⌃",63:"Fn",36:"↩",48:"Tab",49:"空格",51:"⌫",53:"Esc"]
+        return keys.map { code in labels[code] ?? codes.first(where:{$0.value==code})!.key.uppercased() }
+    }
     static func hasElevatedConflictRisk(_ spec:String)->Bool {
         guard let keys=try? resolve(spec),let last=keys.last else { return true }
         // Advice only: applications do not expose a complete global shortcut registry.
@@ -27,7 +52,7 @@ final class Shortcut {
     }
     static func guidance(_ spec:String)->String {
         guard (try? resolve(spec)) != nil else { return "请使用有效组合，例如 ctrl+option+v。" }
-        if hasElevatedConflictRisk(spec) { return "单键或单修饰键组合更易冲突；建议至少使用两个修饰键，避免单独 Shift 和常用编辑快捷键。" }
+        if hasElevatedConflictRisk(spec) { return "此组合容易冲突，建议使用两个修饰键。" }
         return "当前为多修饰键组合，仍需避开其他应用已使用的快捷键。"
     }
     // Sending CGEvents needs PostEvent access. Requiring unrelated AX UI access

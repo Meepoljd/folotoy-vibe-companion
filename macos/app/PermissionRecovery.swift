@@ -55,12 +55,14 @@ enum PermissionSessionStore {
     static func discard(_ id:String) { _=consume(id) }
 }
 
-// Relaunch once after returning from an explicitly requested system grant even
-// when TCC also caches denial for a child process. This never grants access:
+// Refresh a stale grant or recover after returning from an explicitly requested
+// system grant, once per activation. This never grants access:
 // the replacement engine still requires a successful PostEvent preflight.
 enum PermissionRecoveryPolicy {
     static func shouldReload(current:Bool,fresh:Bool?,returnedFromSettings:Bool,alreadyReloaded:Bool)->Bool {
-        !current && !alreadyReloaded && (fresh==true || returnedFromSettings)
+        guard !alreadyReloaded else { return false }
+        if current { return fresh==false }
+        return fresh==true || returnedFromSettings
     }
 }
 

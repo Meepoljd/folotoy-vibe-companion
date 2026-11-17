@@ -12,6 +12,17 @@
 
 ## Unreleased
 
+## v0.8.4 - 2026-11-17
+
+- Connect over Bluetooth or Wi-Fi with the same voice, Enter, reminders and radio features. Bluetooth supports offices where the device cannot join the network.
+- Discover each device once across both links and approve connections on its screen instead of entering a pairing code. Confirm a computer handover on the device.
+- Decode radio on the computer and stream it over either link; improve buffering, reconnection and voice interruption/resume. Use the matching firmware and Mac app together.
+- Start a new device with Bluetooth or optional Wi-Fi setup. Improve hotspot discovery responses and show a ten-second manual-browser fallback.
+- Wake a dark screen before menu or connection-confirmation actions, while retaining direct Home voice and Enter gestures.
+- Simplify input setup, direct BlackHole download, input-method settings and Agent installation guidance.
+
+Local Intel/device acceptance includes voice, Enter, radio/resume, BLE re-pairing, phone Wi-Fi, installed reminder hooks and a fresh-start connection. Power/battery, clean-system and minimum-macOS/Apple Silicon physical testing, and physical multiple-computer/device acceptance remain outside this release's completed local scope. Packages use ad-hoc signing and are not Apple notarized.
+
 ## v0.8.3-vibe-companion - 2026-11-10
 
 First public Vibe Companion release for FoloToy AI Passport, with a native macOS companion app.

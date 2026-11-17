@@ -15,10 +15,12 @@
    xattr -dr com.apple.quarantine "/Applications/Vibe 伴侣.app"
    ```
 
-3. **连接设备：**安装配套固件，让设备和 Mac 位于可互通的局域网；系统询问时允许
-   局域网访问。在 App 输入设备首页显示的六位配对码。
-4. **配置语音（可选）：**安装 [BlackHole 2ch](https://existential.audio/blackhole/) 和
-   [微信输入法](https://z.weixin.qq.com/)。在输入法中将麦克风选为 **BlackHole 2ch**，
+3. **连接设备：**安装配套固件，在 App 点击设备的“连接”，再在设备上按上键确认。
+   同一设备的 Wi-Fi／BLE 合并显示，可同时连接并自动切换。允许局域网／蓝牙访问。
+   换电脑也通过设备确认，详见[设备连接](connections.zh_CN.md)。
+4. **配置语音（可选）：**安装 [BlackHole 2ch](https://existential.audio/downloads/BlackHole2ch-0.7.1.pkg) 和
+   [微信输入法](https://z.weixin.qq.com/)。安装 BlackHole 后重启电脑，再在输入法中
+   将麦克风选为 **BlackHole 2ch**，
    “按住说话”设为**左 Control＋左 Option＋V**，Vibe 伴侣中保持相同快捷键。
    在**系统设置 → 隐私与安全性 → 辅助功能**中开启 **Vibe 伴侣**。
    只用 Agent 提醒时跳过本步。

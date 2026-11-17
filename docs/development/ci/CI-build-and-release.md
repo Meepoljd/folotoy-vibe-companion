@@ -8,7 +8,7 @@
 
 The checks job runs `./tools/validate.sh --static`. The build job restores ccache, runs `./tools/validate.sh --firmware` with ESP-IDF 5.5.3 for ESP32-C3, verifies the bootloader, partition table, and application at the offsets generated in `flash_args`, checks the 8 MB Flash arguments and configured partition layout, then uploads `FoloToy-AI-Passport-full.bin`. The repository default places these images at `0x0`, `0x8000`, and `0x10000`; user-defined partition tables may change the application offset.
 
-The Mac job runs `bash macos/build.sh`, including C/Swift protocol tests, universal arm64/x86_64 compilation, ad-hoc signing, and DMG/ZIP packaging. It needs no paid Apple account or Apple secrets. Only after all three jobs pass does the release job prepare bilingual installation/release notes, checksums and publish both packages. Free ad-hoc distribution is the default; the app is not Apple notarized. See [Vibe release preparation](../../vibe/release.md) for the exact asset list and user instructions.
+The Mac job runs `bash macos/build.sh`, including C/Swift protocol tests, universal arm64/x86_64 compilation, ad-hoc signing, and DMG/ZIP packaging. Before upload, it generates local MP3/AAC/TS fixtures and runs `tests/vibe/test_radio_playback.py --executable <built-app-executable>` against the packaged executable, covering real decoding, HTTP/HLS/ICY failures and cancellation. FFmpeg is only a test-fixture generator; it is not bundled or required at runtime. It needs no paid Apple account or Apple secrets. Only after all three jobs pass does the release job prepare bilingual installation/release notes, checksums and publish both packages. Free ad-hoc distribution is the default; the app is not Apple notarized. See [Vibe release preparation](../../vibe/release.md) for the exact asset list and user instructions.
 
 All Actions are pinned to full commit SHAs. The build job has `contents: read`; only the tag release job receives `contents: write`.
 
@@ -81,4 +81,4 @@ consistent.
 `.github/workflows/macos-checks.yml` independently validates desktop-related pull
 requests, matching pushes to `main`, and manual dispatch. It runs the universal
 build, native protocol/Agent tests, signature verification and DMG verification.
-It has read-only repository permissions and does not create a release.
+The same packaged-executable codec/network regression runs here before the job can pass. It has read-only repository permissions and does not create a release.

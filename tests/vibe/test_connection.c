@@ -1,0 +1,148 @@
+#include "peer.h"
+#include "radio/stream.h"
+#include "connection_request.h"
+#include "cJSON.h"
+#include <assert.h>
+#include <arpa/inet.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#define portMAX_DELAY 0
+#define VIBE_JSON_MAX 1536
+#define ESP_LOGI(...) ((void)0)
+static int v_mutex=1,peer_mutex=2,v_queue=1,udp=1;
+static struct sockaddr_in peer,ble_peer,commit_peer;
+static bool ble_owner,commit_ble,prefer_ble;
+static uint64_t owner_seen,wifi_seen,ble_seen,now_ms=10000;
+static uint32_t owner_generation=1;
+static uint32_t release_generation;
+static bool release_after_send;
+static uint64_t last_sent_ms;
+static char owner_client[37],posted[1537],reply[256];
+static unsigned post_count,hello_count;
+static uint32_t posted_generation;
+static bool hello_authorized,hello_checked;
+static struct { bool ble_peer,provisioning;uint64_t peer_seen_ms;char token[65];vibe_connection_request_t connection_request; } v_status;
+static struct { bool recording; } v_model;
+typedef struct { unsigned heartbeat;char device[18]; } link_snapshot_t;
+static bool locks[3];
+static void xSemaphoreTake(int lock,int wait) { (void)wait;assert(!locks[lock]);assert(!(lock==1 && locks[2]));locks[lock]=true; }
+static void xSemaphoreGive(int lock) { assert(locks[lock]);locks[lock]=false; }
+static uint64_t vibe_now(void) { return now_ms; }
+static link_snapshot_t link_snapshot(void) { return (link_snapshot_t){.heartbeat=5000,.device="aabbccddeeff"}; }
+static size_t copy_text(char *to,const char *from,size_t cap) { size_t n=strlen(from);snprintf(to,cap,"%s",from);return n; }
+#define strlcpy copy_text
+static bool vibe_json_depth_ok(const char *text,size_t n) { (void)text;return n>0; }
+static bool vibe_message_post_link_json(int queue,const char *text,size_t n,uint32_t generation) {
+    (void)queue;assert(n<sizeof(posted));memcpy(posted,text,n);posted[n]=0;posted_generation=generation;++post_count;return true;
+}
+static void hello_to(const struct sockaddr_in *to,bool ble,bool auth,bool checked) {
+    hello_checked=checked;
+    (void)to;(void)ble;(void)checked;hello_authorized=auth;++hello_count;
+}
+/* Cryptographic hash is supplied by mbedTLS on target; this mock tests approval gating, not SHA-256. */
+static bool vibe_connection_approved(const char *token,const char *client,const char *request) {
+    vibe_connect_tick(&v_status.connection_request,now_ms);
+    return v_status.connection_request.phase==V_CONNECT_ACCEPTED && vibe_connect_matches(&v_status.connection_request,client,request,token);
+}
+typedef struct { int type; } vibe_msg_t;
+enum { V_MSG_CONNECTION_CHANGED };
+static int xQueueSend(int queue,const vibe_msg_t *message,int wait) { (void)queue;(void)message;(void)wait;return 1; }
+static int vibe_ble_send_to(uint16_t handle,unsigned char type,const void *bytes,size_t n) {
+    (void)handle;(void)type;assert(n<sizeof(reply));memcpy(reply,bytes,n);reply[n]=0;return 0;
+}
+static ssize_t capture_send(int fd,const void *bytes,size_t n,int flags,const struct sockaddr *from,socklen_t size) {
+    (void)fd;(void)flags;(void)from;(void)size;assert(n-1<sizeof(reply));memcpy(reply,(const char *)bytes+1,n-1);reply[n-1]=0;return (ssize_t)n;
+}
+static unsigned media_count;
+void vibe_radio_remote_receive(const uint8_t *packet,size_t n,uint32_t generation,bool ble) {
+    (void)packet;(void)ble;assert(n==V_RADIO_PACKET && generation==owner_generation && !locks[1] && !locks[2]);++media_count;
+}
+#define sendto capture_send
+#include "link_receive.inc"
+#include "link_release.inc"
+static struct sockaddr_in endpoint(unsigned host,unsigned port) {
+    struct sockaddr_in from={.sin_family=AF_INET,.sin_addr.s_addr=htonl(host),.sin_port=htons(port)};return from;
+}
+static void receive(unsigned type,const char *json,struct sockaddr_in from,bool ble) {
+    unsigned char packet[1537];size_t n=strlen(json);assert(n<sizeof(packet));packet[0]=type;memcpy(packet+1,json,n);process_packet(packet,n+1,&from,ble);
+}
+static void reset(bool bound) {
+    memset(&peer,0,sizeof(peer));memset(&ble_peer,0,sizeof(ble_peer));memset(&v_status,0,sizeof(v_status));
+    if (bound) memset(v_status.token,'a',64);
+    ble_owner=false;prefer_ble=false;owner_seen=wifi_seen=ble_seen=0;owner_generation=1;owner_client[0]=0;post_count=hello_count=0;v_model.recording=false;
+    release_generation=0;release_after_send=false;last_sent_ms=0;
+}
+int main(void) {
+    struct sockaddr_in a=endpoint(0xc0a80102,51001),b=endpoint(0xc0a80103,51002),ble=endpoint(0x7f000001,1);
+    const char *client="11111111-1111-1111-1111-111111111111",*request="22222222-2222-2222-2222-222222222222";
+    const char *credential="bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+    char auth[400],pair[400],ask[512];
+    snprintf(auth,sizeof(auth),"{\"role\":\"pc\",\"type\":\"pc.status\",\"client\":\"%s\",\"device\":\"aabbccddeeff\",\"token\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"}",client);
+    snprintf(pair,sizeof(pair),"{\"type\":\"pair\",\"client\":\"%s\",\"request\":\"%s\",\"device\":\"aabbccddeeff\",\"token\":\"%s\"}",client,request,credential);
+    snprintf(ask,sizeof(ask),"{\"type\":\"connection.request\",\"client\":\"%s\",\"request\":\"%s\",\"device\":\"aabbccddeeff\",\"digest\":\"%s\",\"name\":\"Office Mac\"}",client,request,credential);
+    reset(true);receive(3,"{\"role\":\"pc\"}",a,false);assert(!peer.sin_port && !post_count && hello_count==1);
+    receive(3,auth,a,false);assert(hello_authorized && post_count==1 && peer.sin_port==a.sin_port);
+    uint8_t media[V_RADIO_PACKET]={5};unsigned before_media=media_count;
+    process_packet(media,sizeof(media),&b,false);assert(media_count==before_media);
+    process_packet(media,sizeof(media),&a,false);assert(media_count==before_media+1);
+    process_packet(media,sizeof(media),&ble,true);assert(media_count==before_media+1);
+    uint32_t generation=owner_generation;
+    receive(3,auth,ble,true);assert(hello_authorized && ble_owner && peer.sin_port==a.sin_port && owner_generation==generation);
+    process_packet(media,sizeof(media),&ble,true);assert(media_count==before_media+2);
+    char other[400];strcpy(other,auth);memset(strstr(other,client),'3',8);
+    receive(3,other,b,false);assert(!hello_authorized && peer.sin_port==a.sin_port && owner_generation==generation);
+    receive(2,pair,b,false);assert(post_count==2); /* No physical approval, even for a bound device. */
+    receive(2,ask,b,false);assert(strstr(reply,"pending") && v_status.connection_request.replacing && peer.sin_port==a.sin_port);
+    uint64_t deadline=v_status.connection_request.until;
+    now_ms+=1000;receive(2,ask,ble,true);assert(v_status.connection_request.until==deadline); /* A shared request across both links. */
+    receive(2,pair,b,false);assert(post_count==2);
+    vibe_connect_decide(&v_status.connection_request,true,now_ms);
+    strcpy(other,pair);memset(strstr(other,credential),'c',64);receive(2,other,b,false);assert(post_count==2);
+    receive(2,pair,b,false);assert(post_count==3 && posted_generation==0 && commit_peer.sin_port==b.sin_port && !commit_ble);
+    assert(peer.sin_port==a.sin_port && owner_generation==generation); /* Persistence/commit belongs to the controller. */
+    now_ms+=20001;receive(2,pair,b,false);assert(post_count==3 && v_status.connection_request.phase==V_CONNECT_EXPIRED);
+    reset(false);v_model.recording=true;receive(2,ask,b,false);assert(strstr(reply,"busy") && v_status.connection_request.phase==V_CONNECT_NONE);
+    v_model.recording=false;receive(2,ask,b,false);vibe_connect_decide(&v_status.connection_request,false,now_ms);
+    receive(2,ask,b,false);assert(strstr(reply,"denied"));receive(2,pair,b,false);assert(!post_count);
+    vibe_connection_request_t r={0};
+    assert(!vibe_connect_begin(&r,"bad",request,credential,"Mac",false,1));
+    assert(!vibe_connect_begin(&r,client,request,credential,"Mac\nspoof",false,1));
+    assert(vibe_connect_begin(&r,client,request,credential,"Mac",false,1));
+    assert(!vibe_connect_begin(&r,request,client,credential,"Other",false,2));
+    vibe_connect_tick(&r,45001);assert(r.phase==V_CONNECT_EXPIRED);vibe_connect_decide(&r,true,45002);assert(r.phase==V_CONNECT_EXPIRED);
+    assert(!locks[1] && !locks[2]);
+    reset(true);receive(3,auth,a,false);receive(3,auth,ble,true);
+    char preferred[512];snprintf(preferred,sizeof(preferred),"%.*s,\"primaryTransport\":\"bluetooth\"}",(int)strlen(auth)-1,auth);
+    receive(3,preferred,ble,true);
+    assert(prefer_ble && !vibe_peer_use_wifi(now_ms,wifi_seen,ble_seen,true,ble_owner,prefer_ble));
+    char rejected[512];snprintf(rejected,sizeof(rejected),"%.*s,\"primaryTransport\":\"wifi\"}",(int)strlen(auth)-1,auth);
+    memset(strstr(rejected,"aaaaaaaa"),'c',64);
+    receive(3,rejected,b,false);assert(prefer_ble); /* Unauthenticated cannot change routing. */
+    snprintf(rejected,sizeof(rejected),"%.*s,\"primaryTransport\":\"wifi\"}",(int)strlen(auth)-1,auth);
+    memset(strstr(rejected,client),'3',8);
+    receive(3,rejected,b,false);assert(prefer_ble); /* A different client cannot change an occupied session. */
+    snprintf(preferred,sizeof(preferred),"%.*s,\"primaryTransport\":\"wifi\"}",(int)strlen(auth)-1,auth);
+    receive(3,preferred,a,false);
+    assert(!prefer_ble && vibe_peer_use_wifi(now_ms,wifi_seen,ble_seen,true,ble_owner,prefer_ble));
+    for (unsigned cycle=0;cycle<100;cycle++) {
+        reset(true);receive(3,auth,a,false);receive(3,auth,ble,true);
+        uint32_t old_generation=owner_generation;unsigned before=post_count;
+        v_status.token[0]=0;release_generation=owner_generation;release_after_send=true;last_sent_ms=now_ms;
+        finish_release();
+        assert(!peer.sin_port && !ble_peer.sin_port && !ble_owner && !owner_client[0] && !owner_seen && !last_sent_ms);
+        assert(hello_checked && !hello_authorized); /* Immediate explicit revocation notice to the old endpoints. */
+        assert(owner_generation==old_generation+1 && !release_after_send && !v_status.ble_peer);
+        receive(3,auth,ble,true);assert(!hello_authorized && post_count==before); /* Retained transport grants no application authority. */
+        receive(2,ask,ble,true);assert(strstr(reply,"pending") && !v_status.connection_request.replacing);
+        receive(2,pair,ble,true);assert(post_count==before); /* Still requires a fresh physical decision. */
+        vibe_connect_decide(&v_status.connection_request,true,now_ms);
+        receive(2,pair,ble,true);assert(post_count==before+1 && commit_ble);
+        reset(true);receive(3,auth,ble,true);old_generation=owner_generation;
+        release_generation=owner_generation-1;release_after_send=true;finish_release();
+        assert(ble_owner && owner_generation==old_generation && owner_client[0]); /* Late release cannot revoke a replacement session. */
+        release_generation=owner_generation;release_after_send=true;finish_release();
+        assert(v_status.token[0] && !ble_owner); /* Ordinary disconnect retains the credential. */
+    }
+    puts("Connection ingress: physical approval, credential commitment, timeout, refusal, busy, dual link, generation isolation and 100 unpair/re-pair cycles PASS");
+}

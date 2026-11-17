@@ -2,9 +2,12 @@
 #include <stdlib.h>
 #include <string.h>
 
-bool vibe_message_post_json(QueueHandle_t queue, const char *json, size_t length) {
+bool vibe_message_post_json(QueueHandle_t queue,const char *json,size_t length) {
+    return vibe_message_post_link_json(queue,json,length,0);
+}
+bool vibe_message_post_link_json(QueueHandle_t queue, const char *json, size_t length,uint32_t generation) {
     if (!queue || !json || !length || length>VIBE_JSON_MAX || memchr(json,0,length)) return false;
-    vibe_msg_t message={.type=V_MSG_JSON,.json=malloc(length+1)};
+    vibe_msg_t message={.type=V_MSG_JSON,.link_generation=generation,.json=malloc(length+1)};
     if (!message.json) return false;
     memcpy(message.json,json,length);message.json[length]=0;
     if (xQueueSend(queue,&message,0)==pdTRUE) return true;

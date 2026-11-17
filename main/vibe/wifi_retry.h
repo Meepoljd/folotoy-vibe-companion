@@ -18,8 +18,10 @@ static inline void vibe_wifi_retry_failed(vibe_wifi_retry_t *r,uint64_t now,unsi
         if (r->round<4) r->round++;
     } else r->due=now+500;
 }
-static inline bool vibe_wifi_retry_timeout(const vibe_wifi_retry_t *r,uint64_t now) {
-    return r->pending && now>=r->started && now-r->started>=15000;
+static inline bool vibe_wifi_retry_timeout(const vibe_wifi_retry_t *r,uint64_t now,bool associated) {
+    /* Association and DHCP are separate phases. Keep an associated AP long
+     * enough for a slow DHCP server, while bounding a dead lease attempt. */
+    return r->pending && now>=r->started && now-r->started>=(associated?45000u:15000u);
 }
 static inline bool vibe_wifi_retry_due(const vibe_wifi_retry_t *r,uint64_t now,unsigned count) {
     return count && !r->pending && now>=r->due;
@@ -33,9 +35,4 @@ static inline bool vibe_wifi_disconnect_relevant(const char *target,const uint8_
     if (associated) return false;
     if (!ssid || !length) return true; /* Driver did not identify the failed AP. */
     return length<=32 && strlen(target)==length && !memcmp(target,ssid,length);
-}
-static inline bool vibe_wifi_offer_setup(const vibe_wifi_retry_t *r,uint64_t now,uint64_t boot,
-                                        bool has_saved,bool associated) {
-    return !associated && !r->pending &&
-        (!has_saved || (r->round_done && now>=boot && now-boot>20000));
 }

@@ -81,7 +81,7 @@ void vibe_weather_poll(uint64_t now) {
     reap_locked();
     if (!weather_worker && idle_locked() && now>=next_check) {
         next_check=now+5000;
-        if (v_prefs.weather_enabled &&
+        if (v_prefs.weather_enabled && vibe_weather_memory_ready(8192) &&
             (due(now,v_status.weather_at_ms,v_status.weather_attempt_ms) ||
              due(now,v_status.air_at_ms,v_status.air_attempt_ms))) {
             weather_finished=false;

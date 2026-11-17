@@ -9,6 +9,32 @@ void vibe_model_init(vibe_model_t *m, uint64_t now) {
     m->radio_count=6;
     m->last_activity_ms=now; m->remaining_ms=25*60000ULL;
 }
+bool vibe_model_connection_page(vibe_page_t page) { return page==V_CONNECT_GUIDE || page==V_COMPUTER_GUIDE; }
+void vibe_model_connection_boot(vibe_model_t *m,bool paired,bool skipped) {
+    m->intro_dismissed=skipped;m->connection_from_menu=false;
+    if (!paired && !skipped) m->page=V_CONNECT_GUIDE;
+}
+void vibe_model_connection_complete(vibe_model_t *m,bool connected,uint64_t now) {
+    if (!connected || m->connection_from_menu || !vibe_model_connection_page(m->page)) return;
+    m->page=V_HOME;m->screen_on=true;m->last_activity_ms=now;
+}
+void vibe_model_intro_saved(vibe_model_t *m,bool saved,uint64_t now) {
+    if (!saved) return;
+    m->intro_dismissed=true;m->page=V_HOME;m->screen_on=true;m->last_activity_ms=now;
+}
+void vibe_model_provision_open(vibe_model_t *m,uint64_t now) {
+    if (m->page!=V_PROVISION) m->provision_return=m->page;
+    m->provision_to_ble=false;m->page=V_PROVISION;m->screen_on=true;m->last_activity_ms=now;
+}
+void vibe_model_provision_closed(vibe_model_t *m,bool wifi_saved,bool connected,uint64_t now) {
+    if (m->page!=V_PROVISION) return;
+    bool guide=vibe_model_connection_page(m->provision_return);
+    if (m->provision_to_ble) { m->page=connected?V_HOME:V_COMPUTER_GUIDE;m->guide_wifi=false; }
+    else if (guide && wifi_saved) { m->page=V_COMPUTER_GUIDE;m->guide_wifi=true; }
+    else m->page=m->provision_return;
+    vibe_model_connection_complete(m,connected,now);
+    m->screen_on=true;m->last_activity_ms=now;
+}
 uint64_t vibe_model_remaining(const vibe_model_t *m, uint64_t now) {
     if (m->timer==V_TIMER_READY || m->timer==V_TIMER_ARMED) return m->focus_minutes*60000ULL;
     if (m->timer==V_TIMER_FINISHED) return (m->timer_break?m->break_minutes:m->focus_minutes)*60000ULL;
@@ -75,25 +101,48 @@ unsigned vibe_model_key(vibe_model_t *m, vibe_key_t key, vibe_event_t event, uin
         return actions;
     }
     if (m->wake_only[key] && event != V_PRESS) {
-        /* One deliberate hold may wake and enter the timer; a tap only wakes. */
-        if ((key==V_DOWN || key==V_SETTINGS) && event==V_LONG && m->page==V_HOME) m->wake_only[key]=false;
-        else {
-            if (event == V_CLICK) m->wake_only[key]=false;
-            return 0;
+        /* Consume the whole wake gesture, including a hold and its late click.
+         * Only a short Home/Enter gesture may also send a key while waking. */
+        if (event==V_LONG) {
+            m->suppress_click[key]=true;
+            if (key==V_DOWN) m->wake_enter=false;
         }
+        if (event==V_CLICK) {
+            bool enter=key==V_DOWN && m->wake_enter && m->page==V_HOME && m->enter_ready && !m->recording;
+            m->wake_only[key]=false;
+            if (key==V_DOWN) m->wake_enter=false;
+            return enter?V_ENTER:0;
+        }
+        return 0;
     }
     if (event == V_CLICK && m->suppress_click[key]) { m->suppress_click[key]=false; return 0; }
-    if (event == V_PRESS) { m->suppress_click[key]=false; m->wake_only[key]=false; }
+    if (event == V_PRESS) { m->suppress_click[key]=false; m->wake_only[key]=false;if (key==V_DOWN) m->wake_enter=false; }
     if (!m->screen_on) {
         m->screen_on=true; m->last_activity_ms=now;
-        reset_weather(m);
-        if (!(m->page==V_HOME && event==V_PRESS && (key==V_UP || (key==V_SETTINGS && (m->timer!=V_TIMER_READY || m->radio_active))))) {
+        if (!(m->page==V_HOME && event==V_PRESS && key==V_UP && m->voice_ready)) {
+            m->wake_enter=m->page==V_HOME && event==V_PRESS && key==V_DOWN && m->enter_ready && !m->recording;
             m->suppress_click[key]=true; m->wake_only[key]=true; return 0;
         }
     }
     m->last_activity_ms=now;
     if (event == V_LONG) m->suppress_click[key]=true;
-    if (m->page == V_HOME) {
+    if (m->page==V_CONNECT_GUIDE || m->page==V_COMPUTER_GUIDE) {
+        if (event!=V_CLICK) return 0;
+        if (m->page==V_CONNECT_GUIDE) {
+            if (key==V_UP) { m->page=V_COMPUTER_GUIDE;m->guide_wifi=false; }
+            if (key==V_DOWN) return V_START_PROVISION;
+            if (key==V_SETTINGS) {
+                if (m->connection_from_menu) m->page=V_SETTINGS_PAGE;
+                else return V_DISMISS_INTRO;
+            }
+        } else {
+            if (key==V_DOWN) return V_START_PROVISION;
+            if (key==V_SETTINGS) m->page=V_CONNECT_GUIDE;
+        }
+    } else if (m->page==V_PROVISION) {
+        if (event==V_CLICK && key==V_UP) { m->provision_to_ble=true;return V_FINISH_PROVISION; }
+        if ((event==V_CLICK || event==V_LONG) && key==V_SETTINGS) { m->provision_to_ble=false;return V_FINISH_PROVISION; }
+    } else if (m->page == V_HOME) {
         if (key == V_UP && event == V_PRESS && m->voice_ready && !m->recording) {
             m->recording=true; m->recording_since_ms=now; return V_START_AUDIO;
         }
@@ -159,6 +208,7 @@ unsigned vibe_model_key(vibe_model_t *m, vibe_key_t key, vibe_event_t event, uin
             if (key == V_UP && m->selected) { --m->selected; m->reset_confirm=false; }
             if (key == V_DOWN && m->selected<V_SETTING_COUNT-1) { ++m->selected; m->reset_confirm=false; }
             if (key == V_SETTINGS) {
+                if (m->selected==V_SETTING_CONNECT) { m->connection_from_menu=true;m->page=V_CONNECT_GUIDE;return 0; }
                 if (m->selected==V_SETTING_WIFI) return V_START_PROVISION;
                 if (m->selected==V_SETTING_UNPAIR) {
                     if (!m->reset_confirm) { m->reset_confirm=true; return 0; }

@@ -50,6 +50,8 @@ bash macos/build.sh
 如果 Command Line Tools 缺少 `notarytool`／`stapler`，使用完整 Xcode。
 无需 App Store 审核。证书、私钥、Apple 凭证不要放进仓库或 Release 附件。
 
+Release 的独立安装说明附件包含完整连接指南，离开源码目录后也能阅读，不依赖仓库相对链接。
+
 ## GitHub Actions
 
 现有工作流执行仓库／主机检查，并构建设备固件和通用 Mac App。
@@ -88,6 +90,8 @@ VIBE_MAC_OUTPUT="$PWD/build/review/macos" bash macos/build.sh
 相对文件名的校验值，以及保留许可。
 
 PR／分支检查新增独立的 `macos-checks.yml`，覆盖原生 Swift 测试和通用安装包。
+两个 Mac 工作流也用 `tests/vibe/test_radio_playback.py --executable` 对安装包可执行文件
+运行本地解码／网络样本；FFmpeg 仅生成测试输入，不是最终用户的运行依赖。
 上游基线同步仅手动运行，发布本应用时不自动把上游合并到应用工作中。
 
 Mac 上解析好托管组件后，运行 `bash tools/render_readme.sh` 重新生成 README 图片。

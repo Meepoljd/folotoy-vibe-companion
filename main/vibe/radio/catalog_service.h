@@ -5,7 +5,7 @@ typedef struct cJSON cJSON;
 extern "C" {
 #endif
 enum { V_RADIO_STOPPED, V_RADIO_CONNECTING, V_RADIO_BUFFERING, V_RADIO_PLAYING, V_RADIO_ERROR };
-typedef enum { V_RADIO_SESSION_FAILED, V_RADIO_SESSION_PLAYED, V_RADIO_SESSION_NO_MEMORY } vibe_radio_result_t;
+typedef enum { V_RADIO_SESSION_FAILED, V_RADIO_SESSION_PLAYED, V_RADIO_SESSION_NO_MEMORY, V_RADIO_SESSION_REMOTE_ERROR } vibe_radio_result_t;
 vibe_radio_result_t vibe_radio_session(const char *url,bool (*cancel)(void));
 /* init/sync/request are called by the controller while holding v_mutex. */
 void vibe_radio_catalog_init(void);
